@@ -6,7 +6,11 @@ repository remains separate and private.
 
 This stage tests synthetic XGBoost training, spatial cross-validation, Rasterio
 GeoTIFF processing and portable model persistence in a background browser worker.
-Earth Engine integration and full hazard/risk workflows are not implemented yet.
+Stage 2 adds Earth Engine OAuth controls, a rectangular AOI map and an SRTM DEM
+request with a 30 m UTM grid. A Web OAuth client ID authorised for
+`https://afshinfs.github.io` and an Earth Engine-enabled project are required.
+Authenticated Google sign-in and real Earth Engine retrieval have not yet been
+verified with an owner-configured OAuth client. Full hazard/risk workflows remain pending.
 
 Contains only the HTML interface, browser worker, checks, styling and ML helper
 module needed by the prototype. No credentials or research datasets are included.
