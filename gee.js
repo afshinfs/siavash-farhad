@@ -69,7 +69,7 @@ async function fetchDem({project,token,grid,signal,fetchImpl=fetch}) {
 // Controller appended to the pure Earth Engine request module during packaging.
 const el=id=>document.getElementById(id);
 const PRESET={west:47.70,south:33.135,east:47.73,north:33.155};
-let map, rectangle, elevationLayer, selectionStart, drawing=false, selected, grid, token=null, expiresAt=0, connectedClient=null;
+let map, rectangle, drawingPreview, drawingAnchor, elevationLayer, selectionStart, drawing=false, selected, grid, token=null, expiresAt=0, connectedClient=null;
 let requestController, inspector, demURL, resultReport, session=0, busy=false, pendingAuth=false, inspectionReject=null;
 function message(text,isError=false) {el('ee-message').textContent=text;el('ee-message').className=isError?'ee-message error':'ee-message';}
 function clearResult() {
@@ -84,8 +84,24 @@ function disconnect() {stopRequest();clearAccess();clearResult();el('ee-state').
 function refresh() {
   const connected=Boolean(token)&&Date.now()<expiresAt;
   el('ee-connect').disabled=busy||pendingAuth;el('ee-disconnect').disabled=!token&&!busy&&!pendingAuth;
-  el('ee-fetch').disabled=!connected||!grid||busy;el('ee-cancel').disabled=!busy;
+  el('ee-fetch').disabled=!connected||!grid||busy||drawing;el('ee-cancel').disabled=!busy;
   for(const id of ['ee-client','ee-project','west','south','east','north','ee-apply','ee-preset','ee-draw']) el(id).disabled=busy;
+}
+function clearDrawingPreview() {
+  if(drawingPreview&&map)map.removeLayer(drawingPreview);
+  if(drawingAnchor&&map)map.removeLayer(drawingAnchor);
+  drawingPreview=null;drawingAnchor=null;
+}
+function setDrawing(enabled) {
+  clearDrawingPreview();drawing=enabled;selectionStart=null;
+  if(map)map.getContainer().style.cursor=enabled?'crosshair':'';
+  el('ee-draw').textContent=enabled?'Stop drawing':'Draw rectangle';refresh();
+}
+function updateDrawingPreview(latlng) {
+  if(!drawing||busy||!selectionStart)return;
+  const bounds=window.L.latLngBounds(selectionStart,latlng);
+  if(drawingPreview)drawingPreview.setBounds(bounds);
+  else drawingPreview=window.L.rectangle(bounds,{color:'#b77a18',weight:2,dashArray:'6 4',fillOpacity:0.12,interactive:false}).addTo(map);
 }
 function readBounds() {return Object.fromEntries(['west','south','east','north'].map(k=>[k,el(k).value]));}
 function applyBounds(bounds,{fit=true}={}) {
@@ -176,9 +192,10 @@ async function retrieveDem() {
     else {if(error.status===401)clearAccess();message(safeError(error.message),true);el('ee-state').textContent='Retrieval failed';}
   }finally{if(active===session)stopRequest();}
 }
-el('ee-apply').addEventListener('click',()=>{try{drawing=false;selectionStart=null;el('ee-draw').textContent='Draw rectangle';applyBounds(readBounds());}catch(e){message(e.message,true);}});
-el('ee-preset').addEventListener('click',()=>{try{drawing=false;selectionStart=null;el('ee-draw').textContent='Draw rectangle';applyBounds(PRESET);}catch(e){message(e.message,true);}});
-el('ee-draw').addEventListener('click',()=>{drawing=!drawing;selectionStart=null;el('ee-draw').textContent=drawing?'Stop drawing':'Draw rectangle';message(drawing?'Click two opposite corners on the map.':'Rectangle selection stopped.');});
+el('ee-apply').addEventListener('click',()=>{try{setDrawing(false);applyBounds(readBounds());}catch(e){message(e.message,true);}});
+el('ee-preset').addEventListener('click',()=>{try{setDrawing(false);applyBounds(PRESET);}catch(e){message(e.message,true);}});
+el('ee-draw').addEventListener('click',()=>{setDrawing(!drawing);message(drawing?'Click the first corner, then move the pointer to preview the rectangle.':'Rectangle selection stopped.');});
+document.addEventListener('keydown',event=>{if(event.key==='Escape'&&drawing){setDrawing(false);message('Rectangle selection stopped.');}});
 el('ee-connect').addEventListener('click',()=>{
   try {
     const clientId=validateClientId(el('ee-client').value.trim());validateProject(el('ee-project').value.trim());
@@ -212,10 +229,11 @@ async function startMap() {
     window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
     map.on('click',event=>{
       if(!drawing||busy)return;
-      if(!selectionStart){selectionStart=event.latlng;message('Now click the opposite corner.');return;}
+      if(!selectionStart){selectionStart=event.latlng;drawingAnchor=window.L.circleMarker(selectionStart,{radius:4,color:'#b77a18',fillColor:'#fff',fillOpacity:1,weight:2,interactive:false}).addTo(map);updateDrawingPreview(selectionStart);message('Move the pointer to preview; click the opposite corner to finish, or press Escape to cancel.');return;}
       try{applyBounds({west:Math.min(selectionStart.lng,event.latlng.lng),east:Math.max(selectionStart.lng,event.latlng.lng),south:Math.min(selectionStart.lat,event.latlng.lat),north:Math.max(selectionStart.lat,event.latlng.lat)},{fit:false});}catch(e){message(e.message,true);}
-      drawing=false;selectionStart=null;el('ee-draw').textContent='Draw rectangle';
+      setDrawing(false);
     });
+    map.on('mousemove',event=>updateDrawingPreview(event.latlng));
     applyBounds(PRESET);
   }catch(error){message(error.message,true);el('ee-state').textContent='Map unavailable';}
 }
