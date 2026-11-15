@@ -1,0 +1,7 @@
+{
+  "generator": "official earthengine-api Python serializer",
+  "version": "1.7.52",
+  "algorithmSignatures": "google/earthengine-api python/ee/tests/algorithms.json",
+  "serverEvaluationPerformed": false,
+  "algorithmSignaturesSHA256": "4c2e1db944f9f0fd33652c72f9eed0f4bc45187131ef4df2a3891e53a795c16e"
+}

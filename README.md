@@ -8,6 +8,8 @@ connects their own Earth Engine-enabled project using a Web OAuth client with
 https://afshinfs.github.io as an authorised origin. Tokens stay in browser memory.
 Terrain and hydrology calculations run in background browser workers.
 
+Satellite and environmental retrieval is now available. See [SATELLITE.md](SATELLITE.md) for sources, date controls, proxy definitions and validation limits. Roads and rivers are described in [ROADS_RIVERS.md](ROADS_RIVERS.md).
+
 ## Current processing
 
 - Terrain: Horn slope/aspect, TRASP and Zevenbergen–Thorne planform curvature.
@@ -49,3 +51,4 @@ The separate synthetic Python/ML compatibility checks remain available.
 GitHub Pages deploys main at the repository root. `.nojekyll` preserves files.
 Copyright (c) 2026 Afshin Fouladi. All rights reserved. See COPYRIGHT.
 No open-source licence is granted.
+
