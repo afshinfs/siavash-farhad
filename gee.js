@@ -376,6 +376,7 @@ function clearTerrainProducts(){
 }
 function stopTerrain(){clearTimeout(terrainTimer);terrainTimer=null;terrainEpoch++;terrainWorker?.terminate();terrainWorker=null;el('terrain-run').disabled=!terrainSource;el('terrain-cancel').disabled=true;el('terrain-file').disabled=false;}
 function setTerrainSource(blob,info=null){
+  setHydroSource(blob,info);
   stopTerrain();clearTerrainProducts();terrainSource=blob;terrainSourceInfo=info;
   el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
   el('terrain-run').disabled=!blob;terrainMessage(blob?'Elevation is ready for terrain processing.':'Terrain processing runs locally in your browser.');
@@ -424,4 +425,190 @@ el('terrain-cancel').addEventListener('click',()=>{stopTerrain();clearTerrainPro
 el('terrain-layer').addEventListener('change',showTerrainLayer);
 el('terrain-report').addEventListener('click',()=>{
   if(!terrainReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(terrainReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-terrain-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+
+
+/** Deterministic Priority-Flood filling and D8 routing on a north-up metre grid.
+ * Flats follow the flood discovery tree, without artificial elevation increments.
+ * NoData holes and raster edges are open drainage boundaries.
+ */
+function computeHydrology(input, computeTerrain) {
+  const {values,width,height,dx,dy,nodata=null}=input;
+  // The terrain kernel validates dimensions, resolution, and valid elevations.
+  const terrain=computeTerrain(input), size=width*height, missing=-9999;
+  const valid=new Uint8Array(size),seen=new Uint8Array(size),parent=new Int32Array(size);
+  const filled=new Float32Array(size),direction=new Float32Array(size),acc=new Float32Array(size);
+  const downstream=new Int32Array(size);parent.fill(-1);downstream.fill(-1);
+  const moves=[[1,0,1],[1,1,2],[0,1,4],[-1,1,8],[-1,0,16],[-1,-1,32],[0,-1,64],[1,-1,128]];
+  for(let i=0;i<size;i++){valid[i]=Number.isFinite(values[i])&&(nodata===null||values[i]!==nodata);filled[i]=valid[i]?values[i]:missing;direction[i]=valid[i]?0:missing;acc[i]=valid[i]?1:missing;}
+  // Stable min heap: elevation first, insertion order second.
+  const heap=[];let serial=0;
+  const less=(a,b)=>a.z<b.z||(a.z===b.z&&a.order<b.order);
+  function push(i){const a={i,z:filled[i],order:serial++};let k=heap.length;heap.push(a);while(k){const p=(k-1)>>1;if(!less(a,heap[p]))break;heap[k]=heap[p];k=p;}heap[k]=a;}
+  function pop(){const result=heap[0],last=heap.pop();if(heap.length){let k=0;while(2*k+1<heap.length){let c=2*k+1;if(c+1<heap.length&&less(heap[c+1],heap[c]))c++;if(!less(heap[c],last))break;heap[k]=heap[c];k=c;}heap[k]=last;}return result.i;}
+  function neighbours(i,fn){const x=i%width,y=Math.floor(i/width);for(const [ox,oy,code] of moves){const nx=x+ox,ny=y+oy;fn(nx>=0&&nx<width&&ny>=0&&ny<height?ny*width+nx:-1,ox,oy,code);}}
+  let boundaryCells=0;
+  for(let i=0;i<size;i++)if(valid[i]){let edge=false;neighbours(i,j=>{if(j<0||!valid[j])edge=true;});if(edge){seen[i]=1;push(i);boundaryCells++;}}
+  let visited=0;
+  while(heap.length){const i=pop();visited++;neighbours(i,j=>{if(j<0||!valid[j]||seen[j])return;seen[j]=1;parent[j]=i;filled[j]=Math.max(filled[j],filled[i]);push(j);});}
+  if(visited!==terrain.validCells)throw new Error('Drainage traversal did not reach every valid cell.');
+  let filledCells=0,maxFillDepth=0,flatRoutedCells=0;
+  for(let i=0;i<size;i++)if(valid[i]){
+    const depth=filled[i]-values[i];if(depth>0){filledCells++;maxFillDepth=Math.max(maxFillDepth,depth);}
+    let best=0,target=-1,code=0;
+    neighbours(i,(j,ox,oy,c)=>{if(j<0||!valid[j])return;const gradient=(filled[i]-filled[j])/Math.hypot(ox*dx,oy*dy);if(gradient>best){best=gradient;target=j;code=c;}});
+    if(target<0&&parent[i]>=0){target=parent[i];flatRoutedCells++;neighbours(i,(j,ox,oy,c)=>{if(j===target)code=c;});}
+    downstream[i]=target;direction[i]=code;
+  }
+  // Topological accumulation detects cycles and conserves the unit cell weights.
+  const indegree=new Uint8Array(size),queue=new Int32Array(size);let start=0,end=0;
+  for(let i=0;i<size;i++)if(valid[i]&&downstream[i]>=0)indegree[downstream[i]]++;
+  for(let i=0;i<size;i++)if(valid[i]&&!indegree[i])queue[end++]=i;
+  let processed=0,outlets=0,outletWeight=0;
+  while(start<end){const i=queue[start++],j=downstream[i];processed++;if(j>=0){acc[j]+=acc[i];if(--indegree[j]===0)queue[end++]=j;}else{outlets++;outletWeight+=acc[i];}}
+  if(processed!==terrain.validCells||outletWeight!==terrain.validCells)throw new Error('Drainage routing failed its cycle or accumulation conservation check.');
+  const twi=new Float32Array(size),logflowacc=new Float32Array(size);twi.fill(missing);logflowacc.fill(missing);
+  for(let i=0;i<size;i++)if(valid[i]){const slope=Math.min(89.9,Math.max(0,terrain.layers.slope[i]));twi[i]=Math.log((acc[i]+1)/(Math.tan(slope*Math.PI/180)+1e-3));logflowacc[i]=Math.log1p(acc[i]);}
+  return {layers:{dem_filled:filled,flow_direction:direction,flowacc:acc,logflowacc,twi},nodata:missing,validCells:terrain.validCells,
+    diagnostics:{boundaryCells,filledCells,maxFillDepth,flatRoutedCells,outlets,outletWeight,processedCells:processed,conservationPassed:true}};
+}
+
+/** Worker entry point. Receives only DEM bytes; never receives Google credentials. */
+function hydroWorkerMain(computeHydrology, computeTerrain) {
+  importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js');
+  function writeFloatTIFF(values,width,height,dx,dy,origin,epsg){
+    // Baseline little-endian TIFF: one uncompressed float32 strip and explicit GeoKeys.
+    const entries=[
+      [256,4,[width]],[257,4,[height]],[258,3,[32]],[259,3,[1]],
+      [262,3,[1]],[273,4,[0]],[277,3,[1]],[278,4,[height]],
+      [279,4,[values.length*4]],[284,3,[1]],[339,3,[3]],
+      [33550,12,[dx,dy,0]],[33922,12,[0,0,0,origin[0],origin[1],0]],
+      [34735,3,[1,1,0,4,1024,0,1,1,1025,0,1,1,3072,0,1,epsg,3076,0,1,9001]],
+      [42113,2,Array.from('-9999\0',c=>c.charCodeAt(0))]
+    ];
+    const sizes={2:1,3:2,4:4,12:8};let cursor=8+2+12*entries.length+4;
+    for(const e of entries)if(e[2].length*sizes[e[1]]>4){e[3]=cursor;cursor+=e[2].length*sizes[e[1]];cursor=(cursor+7)&~7;}
+    entries.find(e=>e[0]===273)[2][0]=cursor;
+    const buffer=new ArrayBuffer(cursor+values.length*4),v=new DataView(buffer);
+    v.setUint16(0,0x4949,true);v.setUint16(2,42,true);v.setUint32(4,8,true);v.setUint16(8,entries.length,true);
+    entries.forEach((e,i)=>{const p=10+i*12;v.setUint16(p,e[0],true);v.setUint16(p+2,e[1],true);v.setUint32(p+4,e[2].length,true);
+      const start=e[3]??(p+8);if(e[3]!==undefined)v.setUint32(p+8,e[3],true);
+      e[2].forEach((n,j)=>{const q=start+j*sizes[e[1]];if(e[1]===2)v.setUint8(q,n);else if(e[1]===3)v.setUint16(q,n,true);else if(e[1]===4)v.setUint32(q,n,true);else v.setFloat64(q,n,true);});
+    });
+    values.forEach((n,i)=>v.setFloat32(cursor+i*4,n,true));return buffer;
+  }
+  self.onmessage=async({data})=>{
+    try {
+      const started=performance.now();
+      self.postMessage({type:'progress',message:'Reading the elevation GeoTIFF…'});
+      const hash=await crypto.subtle.digest('SHA-256',data.buffer);
+      const sourceSHA256=Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('');
+      const tiff=await GeoTIFF.fromArrayBuffer(data.buffer);
+      if(await tiff.getImageCount()!==1)throw new Error('Use a single-image DEM without overview or internal mask images.');
+      const image=await tiff.getImage(),keys=image.getGeoKeys(),fd=image.getFileDirectory();
+      const epsg=Number(keys.ProjectedCSTypeGeoKey);
+      if(!((epsg>=32601&&epsg<=32660)||(epsg>=32701&&epsg<=32760)))throw new Error('This stage requires a WGS84 UTM DEM in metre units.');
+      const matrix=fd.ModelTransformation;
+      const rotated=matrix&&(matrix[1]!==0||matrix[2]!==0||matrix[4]!==0||matrix[6]!==0);
+      if(Number(keys.GTRasterTypeGeoKey||1)!==1||rotated||fd.SubIFDs)throw new Error('Use a north-up PixelIsArea GeoTIFF with no transformed or sub-image grid.');
+      if(image.getSamplesPerPixel()!==1)throw new Error('The DEM must have one elevation band.');
+      const width=image.getWidth(),height=image.getHeight(),origin=image.getOrigin(),resolution=matrix?[matrix[0],matrix[5],matrix[10]]:image.getResolution();
+      if(width>512||height>512)throw new Error('Use a DEM no larger than 512 × 512 cells for this stage.');
+      if(!Number.isFinite(origin[0])||!Number.isFinite(origin[1])||resolution[0]<=0||resolution[1]>=0)throw new Error('DEM origin or orientation is unsupported.');
+      const rawNodata=image.getGDALNoData(),nodata=rawNodata===null?null:Number(rawNodata);
+      const values=await image.readRasters({samples:[0],interleave:true});
+      self.postMessage({type:'progress',message:'Filling depressions and routing D8 flow…'});
+      const result=computeHydrology({values,width,height,dx:resolution[0],dy:Math.abs(resolution[1]),nodata},computeTerrain);
+      const products=[];const transfer=[];
+      const units={dem_filled:'metres',flow_direction:'D8 code (0 = outlet)',flowacc:'contributing cells, including self',logflowacc:'ln(1 + contributing cells)',twi:'count-based index (desktop formula)'};
+      for(const [name,layer] of Object.entries(result.layers)) {
+        self.postMessage({type:'progress',message:'Preparing '+name+' GeoTIFF…'});
+        let min=Infinity,max=-Infinity,sum=0,count=0;
+        for(const v of layer)if(v!==result.nodata&&Number.isFinite(v)){min=Math.min(min,v);max=Math.max(max,v);sum+=v;count++;}
+        const preview=new Uint8ClampedArray(width*height*4);
+        for(let i=0;i<layer.length;i++) {
+          const v=layer[i];if(v===result.nodata||!Number.isFinite(v))continue;
+          const f=max===min?.5:(name==='flowacc'?Math.log1p(v-min)/Math.log1p(max-min):(v-min)/(max-min));
+          preview.set([Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f),255],i*4);
+        }
+        const output=writeFloatTIFF(layer,width,height,resolution[0],Math.abs(resolution[1]),origin,epsg);
+        products.push({name,tiff:output,preview:preview.buffer,summary:{min,max,mean:sum/count,validCells:count,unit:units[name]}});
+        transfer.push(output,preview.buffer);
+      }
+      self.postMessage({type:'complete',products,report:{schemaVersion:1,status:'passed',stage:'hydrological terrain processing',
+        sourceSHA256,source:data.source,width,height,crs:'EPSG:'+epsg,
+        transform:{scaleX:resolution[0],scaleY:resolution[1],translateX:origin[0],translateY:origin[1]},
+        nodata:result.nodata,validCells:result.validCells,diagnostics:result.diagnostics,
+        methods:{fill:'Priority-Flood, eight neighbours, no epsilon elevation changes',routing:'D8 steepest descent; equal gradients prefer E, SE, S, SW, W, NW, N, NE; flats follow flood discovery parent',flowacc:'Unit weights including each cell itself',twi:'ln((flowacc + 1) / (tan(original DEM Horn slope, clipped to 0–89.9 degrees) + 0.001))',logflowacc:'ln(1 + flowacc)'},
+        directionCodes:{E:1,SE:2,S:4,SW:8,W:16,NW:32,N:64,NE:128,outlet:0},
+        products:Object.fromEntries(products.map(p=>[p.name,p.summary])),seconds:(performance.now()-started)/1000,
+        limitations:['Raster edges and NoData holes are open boundaries. Upslope catchments outside this DEM are omitted; use a buffered DEM.',
+          'Flat routing differs from RichDEM epsilon filling. This browser stage is not yet numerically equivalent to the desktop hydrology pipeline.',
+          'TWI preserves the desktop count-based formula; it does not use contributing area in square metres or specific catchment area.',
+          'This is terrain drainage routing, not a flood simulation. Flat-cell drainage paths depend on the deterministic tie rule.',
+          'Single-band, single-image, north-up WGS84 UTM square grids; scalar NoData only.' ]}},transfer);
+    }catch(error){self.postMessage({type:'error',message:String(error.message||error)});}
+  };
+}
+
+// Source/result state is shared only with the local Earth Engine controller.
+let hydroTimer=null,hydroSource=null,hydroSourceInfo=null,hydroWorker=null,hydroEpoch=0,hydroReport=null;
+let hydroProducts=[],hydroURLs=[];
+const hydroNames={dem_filled:'Filled DEM',flow_direction:'D8 flow direction',flowacc:'Flow accumulation',logflowacc:'Log flow accumulation',twi:'TWI'};
+function hydroMessage(text,error=false){el('hydro-message').textContent=text;el('hydro-message').className=error?'ee-message error':'ee-message';}
+function clearHydroProducts(){
+  for(const url of hydroURLs)URL.revokeObjectURL(url);hydroURLs=[];hydroProducts=[];hydroReport=null;
+  el('hydro-downloads').replaceChildren();el('hydro-preview').replaceChildren();el('hydro-report').disabled=true;el('hydro-layer').disabled=true;
+  el('hydro-result').textContent='No hydrology layers computed yet.';
+}
+function stopHydro(){clearTimeout(hydroTimer);hydroTimer=null;hydroEpoch++;hydroWorker?.terminate();hydroWorker=null;el('hydro-run').disabled=!hydroSource;el('hydro-cancel').disabled=true;el('hydro-file').disabled=false;}
+function setHydroSource(blob,info=null){
+  stopHydro();clearHydroProducts();hydroSource=blob;hydroSourceInfo=info;
+  el('hydro-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
+  el('hydro-run').disabled=!blob;hydroMessage(blob?'Elevation is ready for hydrological processing.':'Hydrology processing runs locally in your browser.');
+}
+function showHydroLayer(){
+  const product=hydroProducts.find(p=>p.name===el('hydro-layer').value);if(!product||!hydroReport)return;
+  const canvas=document.createElement('canvas');canvas.width=hydroReport.width;canvas.height=hydroReport.height;
+  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview),canvas.width,canvas.height),0,0);
+  canvas.setAttribute('aria-label',hydroNames[product.name]+' raster preview');el('hydro-preview').replaceChildren(canvas);
+  const s=product.summary;
+  el('hydro-result').textContent=`${hydroNames[product.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`;
+}
+async function runHydro(){
+  if(!hydroSource)return;stopHydro();clearHydroProducts();const epoch=hydroEpoch;
+  el('hydro-run').disabled=true;el('hydro-cancel').disabled=false;el('hydro-file').disabled=true;
+  hydroMessage('Starting the hydro worker…');
+  try{
+    const buffer=await hydroSource.arrayBuffer();if(epoch!==hydroEpoch)return;
+    const body='('+hydroWorkerMain.toString()+')('+computeHydrology.toString()+','+computeTerrain.toString()+');';
+    const url=URL.createObjectURL(new Blob([body],{type:'text/javascript'}));hydroWorker=new Worker(url);URL.revokeObjectURL(url);
+    const timeout=hydroTimer=setTimeout(()=>{if(epoch===hydroEpoch){stopHydro();hydroMessage('Hydrology processing timed out. Try a smaller area.',true);}},90000);
+    hydroWorker.onmessage=({data})=>{
+      if(epoch!==hydroEpoch)return;
+      if(data.type==='progress'){hydroMessage(data.message);return;}
+      clearTimeout(timeout);
+      if(data.type==='error'){stopHydro();hydroMessage(data.message,true);return;}
+      hydroProducts=data.products;hydroReport=data.report;
+      for(const p of hydroProducts){
+        const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));hydroURLs.push(downloadURL);
+        const link=document.createElement('a');link.href=downloadURL;link.download=p.name+'_aligned.tif';link.textContent='Download '+hydroNames[p.name];el('hydro-downloads').append(link);
+      }
+      el('hydro-report').disabled=false;el('hydro-layer').disabled=false;el('hydro-layer').value='flowacc';showHydroLayer();
+      stopHydro();hydroMessage(`Hydrology layers computed in ${hydroReport.seconds.toFixed(2)} s. GeoTIFFs keep the DEM grid.`);
+    };
+    hydroWorker.onerror=()=>{if(epoch!==hydroEpoch)return;clearTimeout(timeout);stopHydro();hydroMessage('The hydro worker could not run. Check your connection and try again.',true);};
+    hydroWorker.postMessage({buffer,source:hydroSourceInfo},[buffer]);
+  }catch(error){if(epoch!==hydroEpoch)return;stopHydro();hydroMessage(String(error.message||error),true);}
+}
+el('hydro-file').addEventListener('change',()=>{
+  const file=el('hydro-file').files[0];if(!file)return;
+  if(file.size>8*1024*1024){hydroMessage('Use a DEM smaller than 8 MB.',true);return;}
+  setHydroSource(file,{kind:'local file',label:file.name});
+});
+el('hydro-run').addEventListener('click',runHydro);
+el('hydro-cancel').addEventListener('click',()=>{stopHydro();clearHydroProducts();hydroMessage('Hydrology processing cancelled.');});
+el('hydro-layer').addEventListener('change',showHydroLayer);
+el('hydro-report').addEventListener('click',()=>{
+  if(!hydroReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(hydroReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-hydro-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
