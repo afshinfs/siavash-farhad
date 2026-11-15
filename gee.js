@@ -376,6 +376,7 @@ function clearTerrainProducts(){
 }
 function stopTerrain(){clearTimeout(terrainTimer);terrainTimer=null;terrainEpoch++;terrainWorker?.terminate();terrainWorker=null;el('terrain-run').disabled=!terrainSource;el('terrain-cancel').disabled=true;el('terrain-file').disabled=false;}
 function setTerrainSource(blob,info=null){
+  setLinearSource(blob,info);
   setHydroSource(blob,info);
   stopTerrain();clearTerrainProducts();terrainSource=blob;terrainSourceInfo=info;
   el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
@@ -612,3 +613,213 @@ el('hydro-layer').addEventListener('change',showHydroLayer);
 el('hydro-report').addEventListener('click',()=>{
   if(!hydroReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(hydroReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-hydro-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
+
+
+/** Buffered line rasterisation, exact Euclidean raster distance and smoothed river fraction. */
+function computeLinear({values,width,height,dx,dy,nodata=null,origin,roads,rivers,bufferMetres=1000,densityWindowMetres=200}) {
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<1||height<1||width>512||height>512||values.length!==width*height)throw Error('Use a DEM up to 512 × 512 cells.');
+  if(!Number.isFinite(dx)||dx<=0||!Number.isFinite(dy)||dy<=0||Math.abs(dx-dy)>1e-8||!origin?.slice(0,2).every(Number.isFinite))throw Error('Use a square metre grid with a finite origin.');
+  if(dx<10||dx>100)throw Error('Use 10–100 m pixels for roads and rivers.');
+  if(bufferMetres!==1000||densityWindowMetres!==200)throw Error('This stage uses a 1,000 m search buffer and 200 m density window.');
+  const pad=Math.ceil(bufferMetres/dx),w=width+2*pad,h=height+2*pad;
+  if(w*h>4000000)throw Error('Use a DEM resolution of at least 2 m for buffered processing.');
+  const ox=origin[0]-pad*dx,oy=origin[1]+pad*dy,radius=Math.max(5,dx/2),size=w*h;
+  // Segment-to-rectangle squared distance. Intersection gives zero; otherwise
+  // the minimum occurs at an endpoint-to-box or corner-to-segment pair.
+  function pointSegment(x,y,a,b){const vx=b[0]-a[0],vy=b[1]-a[1],l=vx*vx+vy*vy,t=l?Math.max(0,Math.min(1,((x-a[0])*vx+(y-a[1])*vy)/l)):0;return (x-a[0]-t*vx)**2+(y-a[1]-t*vy)**2;}
+  function touches(a,b,l,t,r,bot){
+    let lo=0,hi=1;const vx=b[0]-a[0],vy=b[1]-a[1];
+    for(const [p,q] of [[-vx,a[0]-l],[vx,r-a[0]],[-vy,a[1]-bot],[vy,t-a[1]]]){if(p===0){if(q<0){lo=2;break;}}else{const u=q/p;if(p<0)lo=Math.max(lo,u);else hi=Math.min(hi,u);}}
+    if(lo<=hi)return true;
+    const box=(p)=>Math.max(l-p[0],0,p[0]-r)**2+Math.max(bot-p[1],0,p[1]-t)**2;
+    return Math.min(box(a),box(b),pointSegment(l,t,a,b),pointSegment(r,t,a,b),pointSegment(l,bot,a,b),pointSegment(r,bot,a,b))<=radius*radius+1e-8;
+  }
+  function burn(lines){const mask=new Uint8Array(size);let segments=0;
+    for(const line of lines)for(let k=1;k<line.length;k++){
+      const a=line[k-1],b=line[k];if(!a?.every(Number.isFinite)||!b?.every(Number.isFinite))throw Error('Line coordinates must be finite.');segments++;
+      const x0=Math.max(0,Math.ceil((Math.min(a[0],b[0])-radius-ox)/dx)-1),x1=Math.min(w-1,Math.floor((Math.max(a[0],b[0])+radius-ox)/dx));
+      const y0=Math.max(0,Math.ceil((oy-Math.max(a[1],b[1])-radius)/dy)-1),y1=Math.min(h-1,Math.floor((oy-Math.min(a[1],b[1])+radius)/dy));
+      for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++)if(!mask[y*w+x]&&touches(a,b,ox+x*dx,oy-y*dy,ox+(x+1)*dx,oy-(y+1)*dy))mask[y*w+x]=1;
+    }
+    return {mask,segments,seedCells:mask.reduce((a,b)=>a+b,0)};
+  }
+  // Felzenszwalb/Huttenlocher lower envelope of squared-distance parabolas.
+  function edt1(f){const n=f.length,v=new Int32Array(n),z=new Float64Array(n+1),d=new Float64Array(n);d.fill(Infinity);let k=-1;
+    for(let q=0;q<n;q++)if(Number.isFinite(f[q])){let s=-Infinity;while(k>=0){const p=v[k];s=((f[q]+q*q)-(f[p]+p*p))/(2*(q-p));if(s>z[k])break;k--;}k++;v[k]=q;z[k]=k===0?-Infinity:s;z[k+1]=Infinity;}
+    if(k<0)return d;let j=0;for(let q=0;q<n;q++){while(j<k&&z[j+1]<q)j++;d[q]=(q-v[j])**2+f[v[j]];}return d;
+  }
+  function distances(mask){const tmp=new Float64Array(size),out=new Float32Array(size);
+    for(let y=0;y<h;y++){const f=new Float64Array(w);for(let x=0;x<w;x++)f[x]=mask[y*w+x]?0:Infinity;tmp.set(edt1(f),y*w);}
+    for(let x=0;x<w;x++){const f=new Float64Array(h);for(let y=0;y<h;y++)f[y]=tmp[y*w+x];const d=edt1(f);for(let y=0;y<h;y++)out[y*w+x]=Math.sqrt(d[y])*dx;}return out;
+  }
+  const reflect=(i,n)=>{if(n===1)return 0;let j=((i%(2*n))+2*n)%(2*n);return j<n?j:2*n-1-j;};
+  function filterAxis(a,kernel,vertical){const result=new Float32Array(size),half=(kernel.length-1)/2;for(let y=0;y<h;y++)for(let x=0;x<w;x++){let sum=0;for(let k=-half;k<=half;k++){const i=vertical?reflect(y+k,h)*w+x:y*w+reflect(x+k,w);sum+=a[i]*kernel[k+half];}result[y*w+x]=sum;}return result;}
+  const rm=burn(rivers),rd=burn(roads);let win=Math.max(3,Math.round(densityWindowMetres/dx));if(win%2===0)win++;
+  if(win>1025)throw Error('Density window too large for this prototype.');
+  let density=new Float32Array(size);
+  if(rm.seedCells){const box=Array(win).fill(1/win);density=filterAxis(filterAxis(rm.mask,box,true),box,false);const sigma=Math.max(1,win/6),rad=Math.floor(4*sigma+0.5),gauss=Array.from({length:2*rad+1},(_,k)=>Math.exp(-0.5*((k-rad)/sigma)**2)),sum=gauss.reduce((a,b)=>a+b,0);for(let k=0;k<gauss.length;k++)gauss[k]/=sum;density=filterAxis(filterAxis(density,gauss,true),gauss,false);}
+  const riverDistance=rm.seedCells?distances(rm.mask):null,roadDistance=rd.seedCells?distances(rd.mask):null;
+  const layers={river_distance:new Float32Array(width*height),road_distance:new Float32Array(width*height),river_density:new Float32Array(width*height)};
+  for(const a of Object.values(layers))a.fill(-9999);let validCells=0;
+  for(let y=0;y<height;y++)for(let x=0;x<width;x++){const i=y*width+x,j=(y+pad)*w+x+pad;if(!Number.isFinite(values[i])||(nodata!==null&&values[i]===nodata))continue;validCells++;layers.river_distance[i]=riverDistance?riverDistance[j]:-9999;layers.road_distance[i]=roadDistance?roadDistance[j]:-9999;layers.river_density[i]=Math.max(0,Math.min(1,density[j]));}
+  if(!validCells)throw Error('DEM has no valid cells.');
+  return {layers,validCells,nodata:-9999,diagnostics:{searchBufferMetres:pad*dx,lineBufferMetres:radius,densityWindowPixels:win,densityWindowMetres:win*dx,riverSegments:rm.segments,roadSegments:rd.segments,riverSeedCells:rm.seedCells,roadSeedCells:rd.seedCells},warnings:[...(!rm.seedCells?['No river pixels found in the search grid: river distance is NoData; river density is zero.']:[]),...(!rd.seedCells?['No major-road pixels found in the search grid: road distance is NoData.']:[])]};
+}
+
+/** Worker receives DEM bytes and optional public OSM data, never Google credentials. */
+function linearWorkerMain(computeLinear) {
+  importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
+  function writeFloatTIFF(values,width,height,dx,dy,origin,epsg){
+    // Baseline little-endian TIFF: one uncompressed float32 strip and explicit GeoKeys.
+    const entries=[
+      [256,4,[width]],[257,4,[height]],[258,3,[32]],[259,3,[1]],
+      [262,3,[1]],[273,4,[0]],[277,3,[1]],[278,4,[height]],
+      [279,4,[values.length*4]],[284,3,[1]],[339,3,[3]],
+      [33550,12,[dx,dy,0]],[33922,12,[0,0,0,origin[0],origin[1],0]],
+      [34735,3,[1,1,0,4,1024,0,1,1,1025,0,1,1,3072,0,1,epsg,3076,0,1,9001]],
+      [42113,2,Array.from('-9999\0',c=>c.charCodeAt(0))]
+    ];
+    const sizes={2:1,3:2,4:4,12:8};let cursor=8+2+12*entries.length+4;
+    for(const e of entries)if(e[2].length*sizes[e[1]]>4){e[3]=cursor;cursor+=e[2].length*sizes[e[1]];cursor=(cursor+7)&~7;}
+    entries.find(e=>e[0]===273)[2][0]=cursor;
+    const buffer=new ArrayBuffer(cursor+values.length*4),v=new DataView(buffer);
+    v.setUint16(0,0x4949,true);v.setUint16(2,42,true);v.setUint32(4,8,true);v.setUint16(8,entries.length,true);
+    entries.forEach((e,i)=>{const p=10+i*12;v.setUint16(p,e[0],true);v.setUint16(p+2,e[1],true);v.setUint32(p+4,e[2].length,true);
+      const start=e[3]??(p+8);if(e[3]!==undefined)v.setUint32(p+8,e[3],true);
+      e[2].forEach((n,j)=>{const q=start+j*sizes[e[1]];if(e[1]===2)v.setUint8(q,n);else if(e[1]===3)v.setUint16(q,n,true);else if(e[1]===4)v.setUint32(q,n,true);else v.setFloat64(q,n,true);});
+    });
+    values.forEach((n,i)=>v.setFloat32(cursor+i*4,n,true));return buffer;
+  }
+  self.onmessage=async({data})=>{
+    try{
+      const started=performance.now(),progress=message=>self.postMessage({type:'progress',message});
+      progress('Reading the DEM grid…');
+      const hash=await crypto.subtle.digest('SHA-256',data.buffer),sourceSHA256=Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('');
+      const tiff=await GeoTIFF.fromArrayBuffer(data.buffer);if(await tiff.getImageCount()!==1)throw Error('Use a single-image DEM without overviews.');
+      const image=await tiff.getImage(),keys=image.getGeoKeys(),fd=image.getFileDirectory(),epsg=Number(keys.ProjectedCSTypeGeoKey);
+      if(!((epsg>=32601&&epsg<=32660)||(epsg>=32701&&epsg<=32760)))throw Error('Use a WGS84 UTM DEM in metre units.');
+      const matrix=fd.ModelTransformation;if(Number(keys.GTRasterTypeGeoKey||1)!==1||fd.SubIFDs||(matrix&&(matrix[1]!==0||matrix[2]!==0||matrix[4]!==0||matrix[6]!==0)))throw Error('Use a north-up PixelIsArea DEM without sub-images.');
+      if(image.getSamplesPerPixel()!==1)throw Error('DEM must have one elevation band.');
+      const width=image.getWidth(),height=image.getHeight(),origin=image.getOrigin(),resolution=matrix?[matrix[0],matrix[5],matrix[10]]:image.getResolution(),dx=resolution[0],dy=Math.abs(resolution[1]);
+      if(width>512||height>512||dx<10||dx>100||resolution[1]>=0||Math.abs(dx-dy)>1e-8||!origin.slice(0,2).every(Number.isFinite))throw Error('Use a north-up square 10–100 m grid, at most 512 × 512 cells.');
+      if(width*dx*height*dy>25000000)throw Error('Use a DEM covering at most 25 km² for OSM retrieval.');
+      const projection=`+proj=utm +zone=${epsg%100} ${epsg>=32700?'+south ':''}+datum=WGS84 +units=m +no_defs`;
+      const pad=Math.ceil(1000/dx),left=origin[0]-pad*dx,right=origin[0]+(width+pad)*dx,top=origin[1]+pad*dy,bottom=origin[1]-(height+pad)*dy;
+      const edge=[];for(let k=0;k<=8;k++){const x=left+(right-left)*k/8,y=bottom+(top-bottom)*k/8;for(const p of [[x,bottom],[x,top],[left,y],[right,y]])edge.push(proj4(projection,'EPSG:4326',p));}
+      const bbox={west:Math.min(...edge.map(p=>p[0])),east:Math.max(...edge.map(p=>p[0])),south:Math.min(...edge.map(p=>p[1])),north:Math.max(...edge.map(p=>p[1]))};
+      if(Object.values(bbox).some(v=>!Number.isFinite(v))||bbox.east-bbox.west>10||bbox.south< -80||bbox.north>84)throw Error('The DEM search bounds are unsupported.');
+      let raw,endpoint=null;
+      const query=`[out:json][timeout:35];(way["waterway"="river"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});way["highway"~"^(trunk|trunk_link|primary|primary_link)$"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););out geom;`;
+      if(data.osmText){progress('Reading the selected OSM file…');raw=JSON.parse(data.osmText);}
+      else {
+        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint='https://overpass-api.de/api/interpreter';
+        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{
+          const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({data:query}),signal:controller.signal});
+          if(!response.ok)throw Error('OSM request returned HTTP '+response.status+'. Try again later, or open a saved OSM JSON/GeoJSON file.');
+          if(Number(response.headers.get('Content-Length')||0)>20000000)throw Error('OSM response is too large. Use a smaller area.');
+          const text=await response.text();if(text.length>20000000)throw Error('OSM response is too large.');raw=JSON.parse(text);
+        }catch(e){if(e.name==='AbortError')throw Error('OSM request timed out. Retry later or open saved OSM data.');throw e;}finally{clearTimeout(timer);}
+      }
+      // Overpass can return partial data plus a runtime remark. Never treat it as complete.
+      if(raw.remark)throw Error('OSM returned incomplete data: '+String(raw.remark).slice(0,250));
+      const features=[],roads=[],rivers=[];let points=0;
+      function add(coords,properties,id){
+        const kind=properties.waterway==='river'?'river':(['trunk','trunk_link','primary','primary_link'].includes(properties.highway)?'road':properties.kind==='river'?'river':properties.kind==='road'?'road':null);
+        if(!kind)return;if(!Array.isArray(coords)||coords.length<2)throw Error('A line has invalid coordinates.');
+        if((points+=coords.length)>300000||features.length>=20000)throw Error('Too many OSM features. Use a smaller area.');
+        const projected=[];for(const p of coords){if(!Array.isArray(p)||!Number.isFinite(p[0])||!Number.isFinite(p[1])||p[0]< -180||p[0]>180||p[1]< -90||p[1]>90)throw Error('OSM coordinates must be WGS84 longitude/latitude.');projected.push(proj4('EPSG:4326',projection,p.slice(0,2)));}
+        (kind==='river'?rivers:roads).push(projected);features.push({type:'Feature',id,properties:{...properties,kind},geometry:{type:'LineString',coordinates:coords.map(p=>p.slice(0,2))}});
+      }
+      if(raw.type==='FeatureCollection'&&Array.isArray(raw.features)){
+        for(const f of raw.features){if(f.geometry?.type==='LineString')add(f.geometry.coordinates,f.properties||{},f.id);else if(f.geometry?.type==='MultiLineString')for(const c of f.geometry.coordinates)add(c,f.properties||{},f.id);}
+      }else if(Array.isArray(raw.elements)){
+        for(const e of raw.elements)if(e.type==='way'&&Array.isArray(e.geometry))add(e.geometry.map(p=>[p.lon,p.lat]),e.tags||{},e.type+'/'+e.id);
+      }else throw Error('Use an Overpass JSON response or a WGS84 GeoJSON FeatureCollection of tagged lines.');
+      const values=await image.readRasters({samples:[0],interleave:true}),rawNodata=image.getGDALNoData(),nodata=rawNodata===null?null:Number(rawNodata);
+      progress('Rasterising lines and calculating distances and density…');
+      const result=computeLinear({values,width,height,dx,dy,nodata,origin,roads,rivers});
+      const products=[],transfer=[],units={river_distance:'metres to buffered river pixels',road_distance:'metres to buffered major-road pixels',river_density:'smoothed river-pixel fraction (0–1)'};
+      for(const [name,layer] of Object.entries(result.layers)){
+        let min=Infinity,max=-Infinity,sum=0,count=0;for(const v of layer)if(v!==-9999&&Number.isFinite(v)){min=Math.min(min,v);max=Math.max(max,v);sum+=v;count++;}
+        const preview=new Uint8ClampedArray(width*height*4);for(let i=0;i<layer.length;i++){const v=layer[i];if(v===-9999)continue;const f=max===min?0.5:(v-min)/(max-min);preview.set([Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f),255],i*4);}
+        const output=writeFloatTIFF(layer,width,height,dx,dy,origin,epsg);products.push({name,tiff:output,preview:preview.buffer,summary:{min:count?min:null,max:count?max:null,mean:count?sum/count:null,validCells:count,unit:units[name]}});transfer.push(output,preview.buffer);
+      }
+      self.postMessage({type:'complete',products,vectors:{type:'FeatureCollection',features},report:{schemaVersion:1,stage:'roads and rivers',status:result.warnings.length?'completed_with_warnings':'completed',sourceSHA256,source:data.source,osmSource:data.osmText?'selected file':'Overpass API',osmTimestamp:raw.osm3s?.timestamp_osm_base||null,processedAt:new Date().toISOString(),endpoint,query: data.osmText?null:query,queryBounds:bbox,width,height,crs:'EPSG:'+epsg,transform:{scaleX:dx,scaleY:-dy,translateX:origin[0],translateY:origin[1]},nodata:-9999,validCells:result.validCells,diagnostics:result.diagnostics,featureCounts:{roads:roads.length,rivers:rivers.length},warnings:result.warnings,
+        methods:{roads:'OSM ways: trunk, trunk_link, primary, primary_link',rivers:'OSM ways: waterway=river',mask:'Capsule line buffer of max(5 m, half a cell); burn every touched pixel',distance:'Exact Euclidean distance between buffered raster-cell centres, in metres',density:'200 m target odd box window, followed by Gaussian sigma=max(1,window/6), truncate=4, half-sample reflect boundaries'},products:Object.fromEntries(products.map(p=>[p.name,p.summary])),seconds:(performance.now()-started)/1000,
+        limitations:['Search covers the DEM plus approximately 1 km; features beyond the search bounds are omitted.','Distances are to buffered raster pixels, not exact vector centrelines.','OSM coverage varies. Missing mapped features do not establish absence of roads or rivers.','Only OSM ways are retrieved; relation-only features are omitted.','River density is a smoothed pixel fraction, not river length per square kilometre.','Desktop equivalence has not been established; rasterisation and buffered query extents may differ.','Selected OSM files must cover the search area; their completeness cannot be established automatically.']}},transfer);
+    }catch(e){self.postMessage({type:'error',message: 'Roads/rivers: '+String(e.message||e).slice(0,600)});}
+  };
+}
+
+// Source/result state is shared only with the local Earth Engine controller.
+let linearTimer=null,linearSource=null,linearSourceInfo=null,linearWorker=null,linearEpoch=0,linearReport=null;
+let linearProducts=[],linearURLs=[],linearVectors=null,linearMapLayer=null,linearOSMText=null;
+const linearNames={river_distance:'Distance to rivers',road_distance:'Distance to major roads',river_density:'River density'};
+function linearMessage(text,error=false){el('linear-message').textContent=text;el('linear-message').className=error?'ee-message error':'ee-message';}
+function clearLinearProducts(){
+  for(const url of linearURLs)URL.revokeObjectURL(url);linearURLs=[];linearProducts=[];linearReport=null;linearVectors=null;el('linear-vectors').disabled=true;if(linearMapLayer&&map)map.removeLayer(linearMapLayer);linearMapLayer=null;
+  el('linear-downloads').replaceChildren();el('linear-preview').replaceChildren();el('linear-report').disabled=true;el('linear-layer').disabled=true;
+  el('linear-result').textContent='No road/river predictors computed yet.';
+}
+function stopLinear(){clearTimeout(linearTimer);linearTimer=null;linearEpoch++;linearWorker?.terminate();linearWorker=null;el('linear-run').disabled=!linearSource;el('linear-cancel').disabled=true;el('linear-file').disabled=false;el('linear-osm-file').disabled=false;el('linear-live').disabled=false;}
+function setLinearSource(blob,info=null){
+  stopLinear();clearLinearProducts();linearSource=blob;linearSourceInfo=info;
+  el('linear-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
+  el('linear-run').disabled=!blob;linearMessage(blob?'DEM ready. Retrieve OSM features, or open saved OSM data.':'Road/river processing runs locally in your browser.');
+}
+function showLinearLayer(){
+  const product=linearProducts.find(p=>p.name===el('linear-layer').value);if(!product||!linearReport)return;
+  const canvas=document.createElement('canvas');canvas.width=linearReport.width;canvas.height=linearReport.height;
+  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview),canvas.width,canvas.height),0,0);
+  canvas.setAttribute('aria-label',linearNames[product.name]+' raster preview');el('linear-preview').replaceChildren(canvas);
+  const s=product.summary;if(!s.validCells){el('linear-result').textContent=linearNames[product.name]+': no mapped features found; distance is NoData.';return;}
+  el('linear-result').textContent=`${linearNames[product.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`;
+}
+async function runLinear(){
+  if(!linearSource)return;stopLinear();clearLinearProducts();const epoch=linearEpoch;
+  el('linear-run').disabled=true;el('linear-cancel').disabled=false;el('linear-file').disabled=true;el('linear-osm-file').disabled=true;el('linear-live').disabled=true;
+  linearMessage('Starting the linear worker…');
+  try{
+    const buffer=await linearSource.arrayBuffer();if(epoch!==linearEpoch)return;
+    const body='('+linearWorkerMain.toString()+')('+computeLinear.toString()+');';
+    const url=URL.createObjectURL(new Blob([body],{type:'text/javascript'}));linearWorker=new Worker(url);URL.revokeObjectURL(url);
+    const timeout=linearTimer=setTimeout(()=>{if(epoch===linearEpoch){stopLinear();linearMessage('Road/river processing timed out. Try a smaller area.',true);}},90000);
+    linearWorker.onmessage=({data})=>{
+      if(epoch!==linearEpoch)return;
+      if(data.type==='progress'){linearMessage(data.message);return;}
+      clearTimeout(timeout);
+      if(data.type==='error'){stopLinear();linearMessage(data.message,true);return;}
+      linearProducts=data.products;linearReport=data.report;linearVectors=data.vectors;el('linear-vectors').disabled=false;
+      if(map&&window.L){linearMapLayer=window.L.geoJSON(linearVectors,{style:f=>({color:f.properties.kind==='river'?'#267ab2':'#b16e28',weight:3,opacity:0.9})}).addTo(map);}
+      for(const p of linearProducts){
+        const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));linearURLs.push(downloadURL);
+        const link=document.createElement('a');link.href=downloadURL;link.download=p.name+'_aligned.tif';link.textContent='Download '+linearNames[p.name];el('linear-downloads').append(link);
+      }
+      el('linear-report').disabled=false;el('linear-layer').disabled=false;el('linear-layer').value='river_distance';showLinearLayer();
+      stopLinear();linearMessage(`Road/river layers computed in ${linearReport.seconds.toFixed(2)} s. ${linearReport.featureCounts.rivers} river lines · ${linearReport.featureCounts.roads} major-road lines. ${linearReport.warnings.join(' ')}`);
+    };
+    linearWorker.onerror=()=>{if(epoch!==linearEpoch)return;clearTimeout(timeout);stopLinear();linearMessage('The linear worker could not run. Check your connection and try again.',true);};
+    linearWorker.postMessage({buffer,source:linearSourceInfo,osmText:linearOSMText},[buffer]);
+  }catch(error){if(epoch!==linearEpoch)return;stopLinear();linearMessage(String(error.message||error),true);}
+}
+el('linear-file').addEventListener('change',()=>{
+  const file=el('linear-file').files[0];if(!file)return;
+  if(file.size>8*1024*1024){linearMessage('Use a DEM smaller than 8 MB.',true);return;}
+  setLinearSource(file,{kind:'local file',label:file.name});
+});
+el('linear-run').addEventListener('click',runLinear);
+el('linear-cancel').addEventListener('click',()=>{stopLinear();clearLinearProducts();linearMessage('Road/river processing cancelled.');});
+el('linear-layer').addEventListener('change',showLinearLayer);
+el('linear-report').addEventListener('click',()=>{
+  if(!linearReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(linearReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-linear-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
+});
+
+el('linear-osm-file').addEventListener('change',async()=>{
+  const file=el('linear-osm-file').files[0];if(!file)return;
+  if(file.size>20*1024*1024){linearMessage('Use an OSM file smaller than 20 MB.',true);return;}
+  stopLinear();clearLinearProducts();const epoch=linearEpoch;linearOSMText=null;
+  try{const text=await file.text();if(epoch!==linearEpoch)return;JSON.parse(text);linearOSMText=text;el('linear-osm-source').textContent='OSM source: '+file.name;linearMessage('Saved OSM data selected. Calculate using the DEM grid.');}
+  catch(e){if(epoch===linearEpoch)linearMessage('Could not read the OSM JSON file: '+e.message,true);}
+});
+el('linear-live').addEventListener('click',()=>{stopLinear();clearLinearProducts();linearOSMText=null;el('linear-osm-file').value='';el('linear-osm-source').textContent='OSM source: live Overpass API';linearMessage('Live OSM source selected.');});
+el('linear-vectors').addEventListener('click',()=>{if(!linearVectors)return;const blob=new Blob([JSON.stringify(linearVectors)],{type:'application/geo+json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='siavash-roads-rivers.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
