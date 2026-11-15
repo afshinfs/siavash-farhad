@@ -712,7 +712,7 @@ function linearWorkerMain(computeLinear) {
       const query=`[out:json][timeout:35];(way["waterway"="river"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});way["highway"~"^(trunk|trunk_link|primary|primary_link)$"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););out geom;`;
       if(data.osmText){progress('Reading the selected OSM file…');raw=JSON.parse(data.osmText);}
       else {
-        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint='https://overpass-api.de/api/interpreter';
+        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint=data.server==='fosssgis'?'https://overpass-api.de/api/interpreter':'https://overpass.private.coffee/api/interpreter';
         const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{
           const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({data:query}),signal:controller.signal});
           if(!response.ok)throw Error('OSM request returned HTTP '+response.status+'. Try again later, or open a saved OSM JSON/GeoJSON file.');
@@ -761,7 +761,7 @@ function clearLinearProducts(){
   el('linear-downloads').replaceChildren();el('linear-preview').replaceChildren();el('linear-report').disabled=true;el('linear-layer').disabled=true;
   el('linear-result').textContent='No road/river predictors computed yet.';
 }
-function stopLinear(){clearTimeout(linearTimer);linearTimer=null;linearEpoch++;linearWorker?.terminate();linearWorker=null;el('linear-run').disabled=!linearSource;el('linear-cancel').disabled=true;el('linear-file').disabled=false;el('linear-osm-file').disabled=false;el('linear-live').disabled=false;}
+function stopLinear(){clearTimeout(linearTimer);linearTimer=null;linearEpoch++;linearWorker?.terminate();linearWorker=null;el('linear-run').disabled=!linearSource;el('linear-cancel').disabled=true;el('linear-file').disabled=false;el('linear-osm-file').disabled=false;el('linear-live').disabled=false;el('linear-server').disabled=false;}
 function setLinearSource(blob,info=null){
   stopLinear();clearLinearProducts();linearSource=blob;linearSourceInfo=info;
   el('linear-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
@@ -777,7 +777,7 @@ function showLinearLayer(){
 }
 async function runLinear(){
   if(!linearSource)return;stopLinear();clearLinearProducts();const epoch=linearEpoch;
-  el('linear-run').disabled=true;el('linear-cancel').disabled=false;el('linear-file').disabled=true;el('linear-osm-file').disabled=true;el('linear-live').disabled=true;
+  el('linear-run').disabled=true;el('linear-cancel').disabled=false;el('linear-file').disabled=true;el('linear-osm-file').disabled=true;el('linear-live').disabled=true;el('linear-server').disabled=true;
   linearMessage('Starting the linear worker…');
   try{
     const buffer=await linearSource.arrayBuffer();if(epoch!==linearEpoch)return;
@@ -799,7 +799,7 @@ async function runLinear(){
       stopLinear();linearMessage(`Road/river layers computed in ${linearReport.seconds.toFixed(2)} s. ${linearReport.featureCounts.rivers} river lines · ${linearReport.featureCounts.roads} major-road lines. ${linearReport.warnings.join(' ')}`);
     };
     linearWorker.onerror=()=>{if(epoch!==linearEpoch)return;clearTimeout(timeout);stopLinear();linearMessage('The linear worker could not run. Check your connection and try again.',true);};
-    linearWorker.postMessage({buffer,source:linearSourceInfo,osmText:linearOSMText},[buffer]);
+    linearWorker.postMessage({buffer,source:linearSourceInfo,osmText:linearOSMText,server:el('linear-server').value},[buffer]);
   }catch(error){if(epoch!==linearEpoch)return;stopLinear();linearMessage(String(error.message||error),true);}
 }
 el('linear-file').addEventListener('change',()=>{
@@ -823,3 +823,5 @@ el('linear-osm-file').addEventListener('change',async()=>{
 });
 el('linear-live').addEventListener('click',()=>{stopLinear();clearLinearProducts();linearOSMText=null;el('linear-osm-file').value='';el('linear-osm-source').textContent='OSM source: live Overpass API';linearMessage('Live OSM source selected.');});
 el('linear-vectors').addEventListener('click',()=>{if(!linearVectors)return;const blob=new Blob([JSON.stringify(linearVectors)],{type:'application/geo+json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='siavash-roads-rivers.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
+
+el('linear-server').addEventListener('change',()=>{stopLinear();clearLinearProducts();linearMessage('OSM server selected. Calculate to retrieve features.');});

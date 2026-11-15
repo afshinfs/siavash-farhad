@@ -44,7 +44,7 @@ export function linearWorkerMain(computeLinear) {
       const query=`[out:json][timeout:35];(way["waterway"="river"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});way["highway"~"^(trunk|trunk_link|primary|primary_link)$"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););out geom;`;
       if(data.osmText){progress('Reading the selected OSM file…');raw=JSON.parse(data.osmText);}
       else {
-        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint='https://overpass-api.de/api/interpreter';
+        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint=data.server==='fosssgis'?'https://overpass-api.de/api/interpreter':'https://overpass.private.coffee/api/interpreter';
         const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{
           const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({data:query}),signal:controller.signal});
           if(!response.ok)throw Error('OSM request returned HTTP '+response.status+'. Try again later, or open a saved OSM JSON/GeoJSON file.');

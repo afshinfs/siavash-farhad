@@ -4,7 +4,9 @@ Stage 5 adds public OpenStreetMap rivers and major roads, distance-to-river,
 distance-to-major-road and smoothed river-pixel density. The page retains the
 Earth Engine, terrain, hydrology and Python compatibility stages.
 
-Live retrieval uses https://overpass-api.de/api/interpreter, with a projected
+Live retrieval defaults to https://overpass.private.coffee/api/interpreter,
+with https://overpass-api.de/api/interpreter selectable as an alternative.
+It uses a projected
 1 km padding around the DEM (rounded up to whole pixels). No Google credentials
 are passed to this worker. A saved Overpass JSON response or WGS84 GeoJSON
 FeatureCollection can be used instead. Saved files must cover the search grid.
