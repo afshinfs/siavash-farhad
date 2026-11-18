@@ -107,7 +107,7 @@ export function decodeFloodDepth(bands, mask, basePeriods, publishedPeriods, tar
   return outputs;
 }
 
-export function createFloodDepthPanel({ element, readConnection, request, rasterWorker, callWorker }) {
+export function createFloodDepthPanel({ element, readConnection, request, rasterWorker, callWorker, onChange = () => {} }) {
   const field = name => element('flood-' + name);
   const options = field('options');
   let source = null;
@@ -123,6 +123,7 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     for (const product of outputs) URL.revokeObjectURL(product.url);
     outputs = [];
     report = null;
+    onChange();
     for (const id of ['preview', 'downloads', 'layer']) field(id).replaceChildren();
     field('result').textContent = '';
     field('report').disabled = true;
@@ -238,6 +239,7 @@ const fit = ${fitGumbelDepths.toString()};
       field('report').disabled = false;
       field('layer').disabled = !outputs.length;
       showLayer();
+      onChange();
       const missing = report.periodsWithoutValidData;
       report.status = outputs.length ? (missing.length ? 'partial' : 'completed') : 'no_data';
       message(
@@ -272,5 +274,5 @@ const fit = ${fitGumbelDepths.toString()};
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
-  return { setSource, refresh };
+  return { setSource, refresh, getProducts: () => outputs };
 }

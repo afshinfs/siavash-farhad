@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=reference-depth-gumbel-1"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=ml-stack-1"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .ee-panel{margin-bottom:28px}.ee-panel .eyebrow{margin-bottom:10px}.ee-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,1fr);gap:26px;margin-top:26px}#ee-map{height:330px;background:#eef3ee;border-radius:8px;border:1px solid #d4dfd6;z-index:0}.ee-map-actions{margin-top:12px}.ee-controls h3,.ee-connection h3,.ee-output h3{font-size:15px;margin:0 0 10px}.ee-help{color:#5e7569;font-size:12px;line-height:1.75}.ee-bounds,.ee-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}label{display:flex;flex-direction:column;gap:7px;font-size:11px;font-weight:600;color:#496258;min-width:0}input{width:100%;min-width:0;padding:11px;border:1px solid #c9d8cd;border-radius:6px;background:#fff;color:#22473e;font:inherit;font-size:13px}input:focus-visible{outline:3px solid #c5ddcf;outline-offset:1px}.ee-connection{border-top:1px solid #e0e8e2;margin-top:26px;padding-top:24px}.ee-connection .ee-help{max-width:700px}.ee-fields{margin:16px 0}.ee-setup{margin:0 0 20px;padding:0 0 16px;border-top:0;border-bottom:1px solid #e0e8e2;font-size:12px;line-height:1.9}.ee-setup ol{padding-left:21px;color:#536e5f}.ee-setup code{background:#edf3ec;padding:2px 5px;overflow-wrap:anywhere}.ee-message{font-size:12px;line-height:1.8;background:#eff5ef;padding:13px 16px;border-radius:6px}.ee-message.error{color:#9c3525;background:#fcf0eb}.ee-output{display:grid;grid-template-columns:1fr 220px;gap:24px;border-top:1px solid #e0e8e2;margin-top:22px;padding-top:22px}#ee-preview canvas{width:100%;height:auto;max-height:220px;object-fit:contain;background:#edf3ee;image-rendering:pixelated;border-radius:6px}.engine-panel{margin-top:24px}#ee-state{font-size:12px;border-radius:20px;padding:8px 12px;background:#edf4ef;white-space:nowrap}.leaflet-container{font-family:inherit}.leaflet-control-attribution a{font-size:10px}
 @media(max-width:720px){.ee-layout{grid-template-columns:1fr;gap:20px}.ee-fields{grid-template-columns:1fr}.ee-output{grid-template-columns:1fr}#ee-preview{max-width:260px}#ee-map{height:280px}}
@@ -14,9 +14,10 @@
 #exp-status:empty,#flood-status:empty{display:none}
 @media(max-width:720px){.exp-options .sat-checks,.exp-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.exp-options .sat-checks,.exp-fields{grid-template-columns:1fr}}
+.stack-table{overflow-x:auto;margin:14px 0}.stack-table table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}.stack-table caption{text-align:left;font-weight:600;margin-bottom:8px}.stack-table th,.stack-table td{padding:8px 12px;border-bottom:1px solid #e0e8e2}.stack-table th{white-space:nowrap}#ml-stack-status:empty{display:none}
 </style>
 </head>
-<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE · STAGE 9</span></header>
+<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE · STAGE 10</span></header>
 <main><section class="intro"><p class="eyebrow">BROWSER COMPUTING / FEASIBILITY</p><h1>SIAVASH &amp; FARHAD<br>in your browser.</h1><p class="lede">Flood hazard and risk frameworks. Retrieve elevation and calculate terrain predictors directly in your browser.</p></section>
 
 <section class="panel ee-panel" aria-labelledby="ee-title">
@@ -176,6 +177,39 @@
     <p class="ee-help">Depths are modelled river flood estimates. Bilinear resampling aligns them to the DEM grid without adding spatial detail. Transparent cells have no valid depth and may fall outside the mapped area or be excluded by the DEM or source masks. A valid zero is retained. Preview colours are scaled to each layer.</p>
     <p class="ee-help">The fit uses the desktop pixel-wise linear regression on the Gumbel reduced variate. It interpolates the 30- and 300-year depths and extrapolates the 1,000-year depth beyond the published range. Negative fitted depths are set to zero. The published 100-year layer remains available directly. <a href="https://developers.google.com/earth-engine/datasets/catalog/JRC_CEMS_GLOFAS_FloodHazard_v2_1">JRC GloFAS v2.1 catalogue</a></p>
   </details>
+</section>
+
+<section class="panel terrain-panel" aria-labelledby="ml-stack-title">
+  <div class="panel-heading">
+    <div><p class="eyebrow">SIAVASH / MODEL INPUTS</p><h2 id="ml-stack-title">Check the flood-depth raster stack</h2></div>
+  </div>
+  <p class="ee-help">Check the terrain, hydrology, road and river, and environmental predictors against the DEM grid. The depth targets are 30, 100, 300, and 1,000 years.</p>
+  <p id="ml-stack-source" class="ee-help"></p>
+  <div class="terrain-actions">
+    <button id="ml-stack-run" disabled>Check raster stack</button>
+    <button id="ml-stack-cancel" class="secondary" disabled>Cancel check</button>
+    <label class="terrain-file-label">Optional local DEM<input id="ml-stack-dem" type="file" accept=".tif,.tiff,image/tiff"></label>
+    <label class="terrain-file-label">Optional aligned GeoTIFFs<input id="ml-stack-layers" type="file" accept=".tif,.tiff,image/tiff" multiple></label>
+    <button id="ml-stack-clear" class="secondary" disabled>Clear local selections</button>
+  </div>
+  <p class="ee-help">The check uses WebGIS outputs from this session. Local files with their original export names override matching layers. All files are read in your browser. Align mismatched files to the DEM before checking again.</p>
+  <p id="ml-stack-status" class="ee-message" role="status" aria-live="polite"></p>
+  <div id="ml-stack-results" hidden>
+    <p id="ml-stack-summary" class="ee-help"></p>
+    <div class="stack-table"><table>
+      <caption>Coverage by return period</caption>
+      <thead><tr><th scope="col">Period (years)</th><th scope="col">Reference cells</th><th scope="col">Usable cells</th><th scope="col">Wet cells ≥ 0.05 m</th><th scope="col">40-cell blocks</th><th scope="col">Status</th></tr></thead>
+      <tbody id="ml-stack-targets"></tbody>
+    </table></div>
+    <details><summary>Individual layer checks</summary>
+      <div class="stack-table"><table>
+        <thead><tr><th scope="col">Layer</th><th scope="col">Source</th><th scope="col">Valid cells</th><th scope="col">Status</th></tr></thead>
+        <tbody id="ml-stack-layer-results"></tbody>
+      </table></div>
+    </details>
+    <p class="ee-help">Usable cells have a valid DEM, all required predictors, and a valid depth target for that period. Spatial-block counts show how many 40 × 40 cell blocks contain usable cells.</p>
+    <button id="ml-stack-report" class="secondary" disabled>Download raster-stack report</button>
+  </div>
 </section>
 
 <section class="panel engine-panel" id="engine-panel" aria-labelledby="run-title"><div class="panel-heading"><div><h2 id="run-title">Processing checks</h2><p>Python + WebAssembly · separate background worker</p></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
