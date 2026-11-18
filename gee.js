@@ -1,3 +1,5 @@
+import { createFloodDepthPanel } from './flood-depth.mjs?v=1';
+
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
 const EE_SCOPE = 'https://www.googleapis.com/auth/earthengine.readonly';
@@ -84,7 +86,7 @@ function stopRequest() {requestController?.abort();requestController=null;inspec
 function disconnect() {stopRequest();clearAccess();clearResult();el('ee-state').textContent='Disconnected';message('Local connection cleared. Google permissions can be managed in your Google account.');}
 function refresh() {
   const connected=Boolean(token)&&Date.now()<expiresAt;
-  queueMicrotask(() => { refreshSatellite(); exposurePanel.refresh(); });
+  queueMicrotask(() => { refreshSatellite(); exposurePanel.refresh(); floodDepthPanel.refresh(); });
   el('ee-connect').disabled=busy||pendingAuth;el('ee-disconnect').disabled=!token&&!busy&&!pendingAuth;
   el('ee-fetch').disabled=!connected||!grid||busy||drawing;el('ee-cancel').disabled=!busy;
   for(const id of ['ee-client','ee-project','west','south','east','north','ee-apply','ee-preset','ee-draw']) el(id).disabled=busy;
@@ -379,6 +381,7 @@ function stopTerrain(){clearTimeout(terrainTimer);terrainTimer=null;terrainEpoch
 function setTerrainSource(blob,info=null){
   setSatelliteSource(blob,info);
   exposurePanel.setSource(blob, info);
+  floodDepthPanel.setSource(blob, info);
   setLinearSource(blob,info);
   setHydroSource(blob,info);
   stopTerrain();clearTerrainProducts();terrainSource=blob;terrainSourceInfo=info;
@@ -2062,6 +2065,34 @@ function decodeExposureLayers(group, bands, mask) {
   return layers;
 }
 
+function callAlignedRasterWorker(active, data, label) {
+  return new Promise((resolve, reject) => {
+    const { worker } = active;
+    const signal = active.controller.signal;
+    const timer = setTimeout(() => {
+      worker.terminate();
+      finish(reject, Error(label + ' raster processing timed out.'));
+    }, 30000);
+    function finish(callback, value) {
+      clearTimeout(timer);
+      signal.removeEventListener('abort', onAbort);
+      worker.onmessage = null;
+      worker.onerror = null;
+      callback(value);
+    }
+    function onAbort() { finish(reject, new DOMException('Cancelled', 'AbortError')); }
+    worker.onmessage = ({ data: response }) => {
+      if (response.type === 'error') finish(reject, Error(response.message));
+      else finish(resolve, response);
+    };
+    worker.onerror = () => finish(reject, Error(label + ' raster worker could not load or decode the response.'));
+    if (signal.aborted) { onAbort(); return; }
+    signal.addEventListener('abort', onAbort, { once: true });
+    try { worker.postMessage(data, [data.buffer]); }
+    catch (error) { finish(reject, error); }
+  });
+}
+
 /** Exposure requests share the satellite transport and aligned raster worker. */
 function createExposurePanel({ element, readConnection }) {
   const field = name => element('exp-' + name);
@@ -2146,33 +2177,6 @@ function createExposurePanel({ element, readConnection }) {
     showLayer();
   }
 
-  function workerCall(active, data) {
-    return new Promise((resolve, reject) => {
-      const { worker } = active;
-      const signal = active.controller.signal;
-      const timer = setTimeout(() => {
-        worker.terminate();
-        finish(reject, Error('Exposure raster processing timed out.'));
-      }, 30000);
-      function finish(callback, value) {
-        clearTimeout(timer);
-        signal.removeEventListener('abort', onAbort);
-        worker.onmessage = null;
-        worker.onerror = null;
-        callback(value);
-      }
-      function onAbort() { finish(reject, new DOMException('Cancelled', 'AbortError')); }
-      worker.onmessage = ({ data: response }) => {
-        if (response.type === 'error') finish(reject, Error(response.message));
-        else finish(resolve, response);
-      };
-      worker.onerror = () => finish(reject, Error('The exposure raster worker could not load or decode the response.'));
-      if (signal.aborted) { onAbort(); return; }
-      signal.addEventListener('abort', onAbort, { once: true });
-      try { worker.postMessage(data, [data.buffer]); }
-      catch (error) { finish(reject, error); }
-    });
-  }
 
   async function run() {
     if (!source || job) return;
@@ -2201,7 +2205,7 @@ function createExposurePanel({ element, readConnection }) {
       const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       try { active.worker = new Worker(url); }
       finally { URL.revokeObjectURL(url); }
-      const prepared = await workerCall(active, { action: 'prepare', buffer });
+      const prepared = await callAlignedRasterWorker(active, { action: 'prepare', buffer }, 'Exposure');
       if (signal.aborted) return;
       report = {
         schemaVersion: 1,
@@ -2234,7 +2238,7 @@ function createExposurePanel({ element, readConnection }) {
             grid: prepared.grid, bands: template.bands,
           });
           if (signal.aborted) return;
-          const result = await workerCall(active, { action: 'product', group: request.key, buffer: pixels, bands: template.bands });
+          const result = await callAlignedRasterWorker(active, { action: 'product', group: request.key, buffer: pixels, bands: template.bands }, 'Exposure');
           if (signal.aborted) return;
           addProducts(result.products);
           dataset.status = result.products.some(product => product.summary.validCells) ? 'retrieved' : 'no_data';
@@ -2291,6 +2295,18 @@ const exposurePanel = createExposurePanel({
   }),
 });
 exposurePanel.refresh();
+
+const floodDepthPanel = createFloodDepthPanel({
+  element: el,
+  readConnection: () => ({
+    project: el('ee-project').value.trim(),
+    accessToken: Date.now() < expiresAt ? token : null,
+  }),
+  request: requestSatellite,
+  rasterWorker: satelliteWorkerMain,
+  callWorker: callAlignedRasterWorker,
+});
+floodDepthPanel.refresh();
 
 // Keep the request independent of the worker so the failover rules can be tested.
 async function retrieveOverpass(query, mode, progress, fetchImpl = fetch, timeoutMs = 45000) {

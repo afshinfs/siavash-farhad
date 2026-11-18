@@ -1,22 +1,22 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=77b577bac9a2"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=reference-depth-1"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .ee-panel{margin-bottom:28px}.ee-panel .eyebrow{margin-bottom:10px}.ee-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,1fr);gap:26px;margin-top:26px}#ee-map{height:330px;background:#eef3ee;border-radius:8px;border:1px solid #d4dfd6;z-index:0}.ee-map-actions{margin-top:12px}.ee-controls h3,.ee-connection h3,.ee-output h3{font-size:15px;margin:0 0 10px}.ee-help{color:#5e7569;font-size:12px;line-height:1.75}.ee-bounds,.ee-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}label{display:flex;flex-direction:column;gap:7px;font-size:11px;font-weight:600;color:#496258;min-width:0}input{width:100%;min-width:0;padding:11px;border:1px solid #c9d8cd;border-radius:6px;background:#fff;color:#22473e;font:inherit;font-size:13px}input:focus-visible{outline:3px solid #c5ddcf;outline-offset:1px}.ee-connection{border-top:1px solid #e0e8e2;margin-top:26px;padding-top:24px}.ee-connection .ee-help{max-width:700px}.ee-fields{margin:16px 0}.ee-setup{margin:0 0 20px;padding:0 0 16px;border-top:0;border-bottom:1px solid #e0e8e2;font-size:12px;line-height:1.9}.ee-setup ol{padding-left:21px;color:#536e5f}.ee-setup code{background:#edf3ec;padding:2px 5px;overflow-wrap:anywhere}.ee-message{font-size:12px;line-height:1.8;background:#eff5ef;padding:13px 16px;border-radius:6px}.ee-message.error{color:#9c3525;background:#fcf0eb}.ee-output{display:grid;grid-template-columns:1fr 220px;gap:24px;border-top:1px solid #e0e8e2;margin-top:22px;padding-top:22px}#ee-preview canvas{width:100%;height:auto;max-height:220px;object-fit:contain;background:#edf3ee;image-rendering:pixelated;border-radius:6px}.engine-panel{margin-top:24px}#ee-state{font-size:12px;border-radius:20px;padding:8px 12px;background:#edf4ef;white-space:nowrap}.leaflet-container{font-family:inherit}.leaflet-control-attribution a{font-size:10px}
 @media(max-width:720px){.ee-layout{grid-template-columns:1fr;gap:20px}.ee-fields{grid-template-columns:1fr}.ee-output{grid-template-columns:1fr}#ee-preview{max-width:260px}#ee-map{height:280px}}
 
-.terrain-panel{margin-top:26px}.terrain-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.terrain-file-label{font-size:11px;min-width:180px;max-width:310px}.terrain-file-label input{font-size:11px;padding:7px}.terrain-results{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:30px;margin-top:22px}.terrain-results select{font:inherit;font-size:13px;padding:10px;border:1px solid #cad9ce;border-radius:6px;background:#fff;color:#295648}.terrain-downloads{display:flex;gap:12px 20px;flex-wrap:wrap;margin:20px 0}.terrain-downloads a{font-size:12px}#terrain-preview canvas,#hydro-preview canvas,#linear-preview canvas,#sat-preview canvas,#exp-preview canvas{width:100%;height:auto;max-height:320px;object-fit:contain;image-rendering:pixelated;background:#eef4ee}.terrain-panel details{margin-top:22px}@media(max-width:650px){.terrain-results{grid-template-columns:1fr}#terrain-preview{max-width:260px}}
+.terrain-panel{margin-top:26px}.terrain-actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}.terrain-file-label{font-size:11px;min-width:180px;max-width:310px}.terrain-file-label input{font-size:11px;padding:7px}.terrain-results{display:grid;grid-template-columns:minmax(0,1fr) 280px;gap:30px;margin-top:22px}.terrain-results select{font:inherit;font-size:13px;padding:10px;border:1px solid #cad9ce;border-radius:6px;background:#fff;color:#295648}.terrain-downloads{display:flex;gap:12px 20px;flex-wrap:wrap;margin:20px 0}.terrain-downloads a{font-size:12px}#terrain-preview canvas,#hydro-preview canvas,#linear-preview canvas,#sat-preview canvas,#exp-preview canvas,#flood-preview canvas{width:100%;height:auto;max-height:320px;object-fit:contain;image-rendering:pixelated;background:#eef4ee}.terrain-panel details{margin-top:22px}@media(max-width:650px){.terrain-results{grid-template-columns:1fr}#terrain-preview{max-width:260px}}
 .sat-checks{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin:22px 0}.sat-checks label{flex-direction:row;align-items:center;line-height:1.6}.sat-checks input[type=checkbox]{width:auto;flex:none}.sat-dates{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px;margin:18px 0}#sat-options select{font:inherit;font-size:13px;padding:10px;border:1px solid #cad9ce;border-radius:6px;background:#fff;color:#295648}@media(max-width:720px){.sat-checks,.sat-dates{grid-template-columns:repeat(2,minmax(0,1fr))}}@media(max-width:420px){.sat-checks,.sat-dates{grid-template-columns:1fr}}
 
 .exp-options{padding:0;border:0;margin:20px 0;min-width:0}.exp-options legend{font-weight:600;font-size:.95rem}
 .exp-options .sat-checks{grid-template-columns:repeat(4,minmax(0,1fr));margin:12px 0}
 .exp-options select{font:inherit;padding:10px;border:1px solid #cad9ce;border-radius:6px;background:white}
 .exp-fields{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
-#exp-status:empty{display:none}
+#exp-status:empty,#flood-status:empty{display:none}
 @media(max-width:720px){.exp-options .sat-checks,.exp-fields{grid-template-columns:repeat(2,minmax(0,1fr))}}
 @media(max-width:420px){.exp-options .sat-checks,.exp-fields{grid-template-columns:1fr}}
 </style>
 </head>
-<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE · STAGE 7</span></header>
+<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE · STAGE 8</span></header>
 <main><section class="intro"><p class="eyebrow">BROWSER COMPUTING / FEASIBILITY</p><h1>SIAVASH &amp; FARHAD<br>in your browser.</h1><p class="lede">Flood hazard and risk frameworks. Retrieve elevation and calculate terrain predictors directly in your browser.</p></section>
 
 <section class="panel ee-panel" aria-labelledby="ee-title">
@@ -133,13 +133,54 @@
   </details>
 </section>
 
+<section class="panel terrain-panel" aria-labelledby="flood-title">
+  <div class="panel-heading"><div><p class="eyebrow">REFERENCE DEPTH / EARTH ENGINE</p><h2 id="flood-title">Retrieve reference flood depths</h2><p>JRC GloFAS v2.1 · river flood depth in metres · 90 m source grid</p></div></div>
+  <p class="ee-help" id="flood-auth"></p>
+  <p class="ee-help" id="flood-source">Retrieve a DEM above or open a DEM here.</p>
+  <fieldset id="flood-options" class="exp-options">
+    <legend>Published return periods</legend>
+    <div class="sat-checks">
+      <label><input type="checkbox" data-flood-period value="10" checked>10-year</label>
+      <label><input type="checkbox" data-flood-period value="20" checked>20-year</label>
+      <label><input type="checkbox" data-flood-period value="50" checked>50-year</label>
+      <label><input type="checkbox" data-flood-period value="75" checked>75-year</label>
+      <label><input type="checkbox" data-flood-period value="100" checked>100-year</label>
+      <label><input type="checkbox" data-flood-period value="200" checked>200-year</label>
+      <label><input type="checkbox" data-flood-period value="500" checked>500-year</label>
+    </div>
+    <div class="sat-checks">
+      <label><input type="checkbox" id="flood-spurious" checked>Mask flagged spurious depths</label>
+      <label><input type="checkbox" id="flood-water" checked>Mask permanent water</label>
+    </div>
+  </fieldset>
+  <div class="terrain-actions">
+    <button id="flood-run" disabled>Retrieve reference depths</button>
+    <button id="flood-cancel" class="secondary" disabled>Cancel retrieval</button>
+    <label class="terrain-file-label">Or open a DEM for flood depth<input id="flood-file" type="file" accept=".tif,.tiff,image/tiff"></label>
+  </div>
+  <p class="ee-message" id="flood-status" role="status" aria-live="polite"></p>
+  <div class="terrain-results">
+    <div>
+      <label>Return period preview<select id="flood-layer" disabled></select></label>
+      <p id="flood-result" class="ee-help"></p>
+      <div id="flood-downloads" class="terrain-downloads"></div>
+      <button id="flood-report" class="secondary" disabled>Download flood-depth report</button>
+    </div>
+    <div id="flood-preview" aria-label="Reference flood-depth raster preview"></div>
+  </div>
+  <details><summary>Flood-depth methods and coverage</summary>
+    <p class="ee-help">Depths are modelled river flood estimates. Bilinear resampling aligns them to the DEM grid without adding spatial detail. Transparent cells have no valid depth and may fall outside the mapped area or be excluded by the DEM or source masks. A valid zero is retained. Preview colours are scaled to each layer.</p>
+    <p class="ee-help">The 100-year layer is published directly. The 30- and 300-year layers require Gumbel interpolation and the 1,000-year layer requires extrapolation. <a href="https://developers.google.com/earth-engine/datasets/catalog/JRC_CEMS_GLOFAS_FloodHazard_v2_1">JRC GloFAS v2.1 catalogue</a></p>
+  </details>
+</section>
+
 <section class="panel engine-panel" id="engine-panel" aria-labelledby="run-title"><div class="panel-heading"><div><h2 id="run-title">Processing checks</h2><p>Python + WebAssembly · separate background worker</p></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
 <p class="notice">This test uses a small <strong>synthetic dataset</strong>. It checks software compatibility, not flood prediction accuracy. The first run downloads the Python runtime and scientific packages from jsDelivr and may take several minutes. No sign-in or data upload is required.</p>
 <div class="actions"><button id="run">Run browser checks <span aria-hidden="true">↗</span></button><button id="cancel" class="secondary" disabled>Cancel</button><button id="download" class="secondary" disabled>Download report</button><a id="raster" hidden download="synthetic-depth.tif">Download test GeoTIFF</a></div>
 <ol id="checks" aria-label="Compatibility checks"></ol>
 <div class="stats"><div><span id="elapsed">0.0 s</span><small>Elapsed time</small></div><div><span id="heartbeat">0</span><small>Interface heartbeats</small></div><div><span id="grid">64 × 64</span><small>Synthetic raster / 30 m cells</small></div></div>
 <details><summary>Live processing log</summary><pre id="log" aria-label="Processing log"></pre></details><details id="report-details"><summary>Report details</summary><pre id="report" aria-label="Test report">Run the checks to generate a report.</pre></details></section>
-<section class="scope"><div><p class="eyebrow">WHAT THIS PROVES</p><h2>A working engine is the first step.</h2></div><div><p>A passing report confirms the tested operations work on this browser and device. The report records package versions, timings, numerical checks and limitations.</p><p>Elevation, terrain attributes, depression filling, D8 routing, flow accumulation and TWI are available above. Road and river predictors are also available. Satellite and environmental retrieval is available above. Exposure layers are available above. The next stage is retrieval of reference flood depths; desktop comparisons are still required. The full SIAVASH hazard and FARHAD risk workflows are not implemented in this prototype.</p></div></section>
+<section class="scope"><div><p class="eyebrow">WHAT THIS PROVES</p><h2>A working engine is the first step.</h2></div><div><p>A passing report confirms the tested operations work on this browser and device. The report records package versions, timings, numerical checks and limitations.</p><p>Elevation, terrain attributes, depression filling, D8 routing, flow accumulation and TWI are available above. Road and river predictors are also available. Satellite and environmental retrieval is available above. Exposure layers are available above. JRC GloFAS reference depths can be retrieved and aligned to the DEM grid. The full SIAVASH hazard and FARHAD risk workflows are not implemented in this prototype.</p></div></section>
 </main><footer>© 2026 Afshin Fouladi · All rights reserved.<span>Pyodide 314.0.8 · no processing server</span></footer></body></html>
 
 
