@@ -1,5 +1,5 @@
 /** Source decoding/export worker. Google credentials never enter this worker. */
-export function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup){
+export function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={}){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg){
@@ -52,7 +52,7 @@ export function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGrou
         if(t.width!==s.width||t.height!==s.height||t.epsg!==s.epsg||Math.abs(t.dx-s.dx)>1e-8||Math.abs(t.dy-s.dy)>1e-8||Math.abs(t.origin[0]-s.origin[0])>1e-5||Math.abs(t.origin[1]-s.origin[1])>1e-5)throw Error('Earth Engine response does not match the DEM grid.');
         if(t.image.getSamplesPerPixel()!==data.bands.length)throw Error('Earth Engine returned an unexpected band count.');
         const raster=await t.image.readRasters(),bands=Object.fromEntries(data.bands.map((name,i)=>[name,raster[i]])),layers=deriveSatelliteLayers(data.group,bands,s.mask,{manning:manningLookup,soil:soilGroupLookup}),products=[],transfer=[];
-        const units={lulc:'ESA class code',manning:'Manning n (s m⁻¹ᐟ³)',ndvi:'NDVI (−1 to 1)',ndvi_observations:'valid scene observations',rainfall:'mm accumulated over the selected period',spi_proxy:'standardised precipitation anomaly (z-score)',hsg_proxy:'soil-texture proxy group A=1, B=2, C=3, D=4',merit_hnd:'metres above EGM96 geoid (adjusted elevation)'};
+        const units={lulc:'ESA class code',manning:'Manning n (s m⁻¹ᐟ³)',ndvi:'NDVI (−1 to 1)',ndvi_observations:'valid scene observations',rainfall:'mm accumulated over the selected period',spi_proxy:'standardised precipitation anomaly (z-score)',hsg_proxy:'soil-texture proxy group A=1, B=2, C=3, D=4',merit_hnd:'metres above EGM96 geoid (adjusted elevation)',...extraUnits};
         const classColors={10:[0,100,0],20:[255,187,34],30:[255,255,76],40:[240,150,255],50:[250,0,0],60:[180,180,180],70:[240,240,240],80:[0,100,200],90:[0,150,160],95:[0,207,117],100:[250,230,160]};
         for(const [name,layer] of Object.entries(layers)){
           let count=0,min=Infinity,max=-Infinity,sum=0;for(const v of layer)if(v!==-9999){count++;min=Math.min(min,v);max=Math.max(max,v);sum+=v;}
