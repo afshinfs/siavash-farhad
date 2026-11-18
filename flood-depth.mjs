@@ -1,5 +1,6 @@
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
+const gumbelPeriods = [30, 300, 1000];
 
 export function buildFloodRequest(periods, { maskSpurious, maskWater }, { bounds, grid }) {
   if (!periods.length || new Set(periods).size !== periods.length ||
@@ -58,14 +59,52 @@ export function buildFloodRequest(periods, { maskSpurious, maskWater }, { bounds
   };
 }
 
-// Serialized into the existing raster worker, so this function is self-contained.
-export function decodeFloodDepth(_group, bands, mask) {
-  return Object.fromEntries(Object.entries(bands).map(([name, samples]) => {
-    if (samples.length !== mask.length) throw Error('Flood-depth band does not match the DEM dimensions.');
+// Both functions are serialized into the existing raster worker.
+export function fitGumbelDepths(basePeriods, inputLayers, targetPeriods) {
+  const reducedVariate = period => -Math.log(-Math.log(1 - 1 / period));
+  const reduced = basePeriods.map(reducedVariate);
+  const mean = reduced.reduce((sum, value) => sum + value, 0) / reduced.length;
+  const centered = reduced.map(value => value - mean);
+  const variance = centered.reduce((sum, value) => sum + value * value, 0);
+  const targets = targetPeriods.map(period => reducedVariate(period) - mean);
+  const outputs = targets.map(() => new Float32Array(inputLayers[0].length).fill(-9999));
+  for (let cell = 0; cell < inputLayers[0].length; cell++) {
+    let sum = 0;
+    let complete = true;
+    for (const layer of inputLayers) {
+      const depth = layer[cell];
+      if (depth === -9999 || !Number.isFinite(depth)) {
+        complete = false;
+        break;
+      }
+      sum += depth;
+    }
+    if (!complete) continue;
+    const meanDepth = sum / inputLayers.length;
+    const covariance = centered.reduce((total, offset, i) =>
+      total + offset * (inputLayers[i][cell] - meanDepth), 0);
+    const slope = covariance / variance;
+    for (const [i, offset] of targets.entries()) {
+      outputs[i][cell] = Math.max(0, meanDepth + slope * offset);
+    }
+  }
+  return outputs;
+}
+
+export function decodeFloodDepth(bands, mask, basePeriods, publishedPeriods, targetPeriods, fit) {
+  const layers = Object.fromEntries(basePeriods.map(period => {
+    const samples = bands['RP' + period + '_depth'];
+    if (samples?.length !== mask.length) throw Error('Flood-depth band does not match the DEM dimensions.');
     const values = Float32Array.from(samples, (value, i) =>
       mask[i] && Number.isFinite(value) && value !== -9999 ? Math.max(0, value) : -9999);
-    return [name, values];
+    return [period, values];
   }));
+  const outputs = Object.fromEntries(publishedPeriods.map(period => ['RP' + period + '_depth', layers[period]]));
+  if (targetPeriods.length) {
+    const fitted = fit(basePeriods, basePeriods.map(period => layers[period]), targetPeriods);
+    for (const [i, period] of targetPeriods.entries()) outputs['RP' + period + '_depth'] = fitted[i];
+  }
+  return outputs;
 }
 
 export function createFloodDepthPanel({ element, readConnection, request, rasterWorker, callWorker }) {
@@ -95,6 +134,7 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     field('cancel').disabled = !active;
     field('file').disabled = Boolean(active);
     options.disabled = Boolean(active);
+    field('run').textContent = field('gumbel').checked ? 'Retrieve depths and fit Gumbel' : 'Retrieve reference depths';
     field('auth').textContent = connected
       ? 'Using the Earth Engine connection above.'
       : 'Connect your Google account above to retrieve GloFAS depths.';
@@ -122,7 +162,7 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     const canvas = document.createElement('canvas');
     canvas.width = width;
     canvas.height = height;
-    canvas.setAttribute('aria-label', product.period + '-year GloFAS depth preview');
+    canvas.setAttribute('aria-label', product.label + ' preview');
     canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview), width, height), 0, 0);
     field('preview').replaceChildren(canvas);
     const { min, max, validCells } = product.summary;
@@ -132,7 +172,9 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
   async function run() {
     if (!source || active) return;
     const periods = Array.from(options.querySelectorAll('[data-flood-period]:checked'), input => Number(input.value));
-    if (!periods.length) { message('Select at least one return period.', true); return; }
+    const targets = field('gumbel').checked ? gumbelPeriods : [];
+    if (!periods.length && !targets.length) { message('Select a published return period or enable the Gumbel fit.', true); return; }
+    const inputs = targets.length ? glofasPeriods : periods;
     const settings = { maskSpurious: field('spurious').checked, maskWater: field('water').checked };
     const selected = source;
     const connection = readConnection();
@@ -145,16 +187,20 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
       message('Reading the DEM grid…');
       const buffer = await selected.blob.arrayBuffer();
       if (signal.aborted) return;
-      const units = Object.fromEntries(periods.map(period => ['RP' + period + '_depth', 'm']));
-      const code = '(' + rasterWorker.toString() + ')(' + decodeFloodDepth.toString() + ',{},{},' + JSON.stringify(units) + ');';
+      const units = Object.fromEntries([...periods, ...targets].map(period => ['RP' + period + '_depth', 'm']));
+      const selections = [inputs, periods, targets].map(values => JSON.stringify(values)).join(',');
+      const code = `const decode = ${decodeFloodDepth.toString()};
+const fit = ${fitGumbelDepths.toString()};
+(${rasterWorker.toString()})((_, bands, mask) => decode(bands, mask, ${selections}, fit), {}, {}, ${JSON.stringify(units)});`;
       const workerURL = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       try { job.worker = new Worker(workerURL); }
       finally { URL.revokeObjectURL(workerURL); }
       const prepared = await callWorker(job, { action: 'prepare', buffer }, 'Flood-depth');
-      const { expression, bandNames } = buildFloodRequest(periods, settings, prepared);
+      const { expression, bandNames } = buildFloodRequest(inputs, settings, prepared);
       message('Retrieving GloFAS v2.1 reference depths…');
       const pixels = await request({ ...connection, expression, grid: prepared.grid, bands: bandNames, signal });
       if (signal.aborted) return;
+      if (targets.length) message('Fitting Gumbel depths in your browser…');
       const { products } = await callWorker(job, {
         action: 'product', group: 'flood-depth', buffer: pixels, bands: bandNames,
       }, 'Flood-depth');
@@ -162,24 +208,31 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
       report = {
         schemaVersion: 1, stage: 'reference flood depths', asset: glofasAsset, nominalSourceResolutionM: 90,
         source: selected.info, sourceSHA256: prepared.sourceSHA256, grid: prepared.grid,
-        demValidCells: prepared.validCells, periods, settings, nodata: -9999,
+        demValidCells: prepared.validCells, periods, requestedSourcePeriods: inputs, settings, nodata: -9999,
         resampling: 'Earth Engine bilinear on the DEM grid', processedAt: new Date().toISOString(),
+        ...(targets.length && { gumbel: {
+          interpolationPeriods: [30, 300], extrapolationPeriods: [1000],
+          method: 'Pixel-wise ordinary least squares of depth on -ln(-ln(1 - 1/T)). All seven source values required. Negative fitted depths are set to zero. Slopes are unconstrained.',
+        } }),
         products: Object.fromEntries(products.map(product => [product.name, product.summary])),
         periodsWithoutValidData: [],
       };
       for (const product of products) {
         const period = Number(product.name.match(/^RP(\d+)_depth$/)[1]);
+        const method = targets.includes(period) ? (period === 1000 ? 'Gumbel extrapolation' : 'Gumbel interpolation') : 'GloFAS';
+        report.products[product.name].method = method;
         if (!product.summary.validCells) {
           report.periodsWithoutValidData.push(period);
           continue;
         }
         const url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
-        outputs.push({ ...product, period, url });
-        field('layer').add(new Option(period + '-year depth', product.name));
+        const label = period.toLocaleString() + '-year · ' + method;
+        outputs.push({ ...product, label, url });
+        field('layer').add(new Option(label, product.name));
         const link = document.createElement('a');
         link.href = url;
         link.download = 'flood_' + period + 'yr_aligned.tif';
-        link.textContent = 'Download ' + period + '-year depth';
+        link.textContent = 'Download ' + label;
         field('downloads').append(link);
       }
       field('report').disabled = false;
@@ -202,7 +255,7 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
   field('run').addEventListener('click', run);
   field('cancel').addEventListener('click', () => { stop(); message('Flood-depth retrieval cancelled.'); });
   field('layer').addEventListener('change', showLayer);
-  options.addEventListener('change', () => { clear(); message(''); });
+  options.addEventListener('change', () => { clear(); message(''); refresh(); });
   field('file').addEventListener('change', event => {
     const file = event.target.files[0];
     event.target.value = '';

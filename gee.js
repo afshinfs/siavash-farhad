@@ -1,4 +1,4 @@
-import { createFloodDepthPanel } from './flood-depth.mjs?v=1';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=2';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
