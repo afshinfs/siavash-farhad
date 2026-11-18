@@ -1,5 +1,5 @@
 /** Worker receives DEM bytes and optional public OSM data, never Google credentials. */
-export function linearWorkerMain(computeLinear) {
+export function linearWorkerMain(computeLinear, retrieveOverpass) {
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg){
     // Baseline little-endian TIFF: one uncompressed float32 strip and explicit GeoKeys.
@@ -40,17 +40,12 @@ export function linearWorkerMain(computeLinear) {
       const edge=[];for(let k=0;k<=8;k++){const x=left+(right-left)*k/8,y=bottom+(top-bottom)*k/8;for(const p of [[x,bottom],[x,top],[left,y],[right,y]])edge.push(proj4(projection,'EPSG:4326',p));}
       const bbox={west:Math.min(...edge.map(p=>p[0])),east:Math.max(...edge.map(p=>p[0])),south:Math.min(...edge.map(p=>p[1])),north:Math.max(...edge.map(p=>p[1]))};
       if(Object.values(bbox).some(v=>!Number.isFinite(v))||bbox.east-bbox.west>10||bbox.south< -80||bbox.north>84)throw Error('The DEM search bounds are unsupported.');
-      let raw,endpoint=null;
+      let raw,endpoint=null,osmAttempts=[];
       const query=`[out:json][timeout:35];(way["waterway"="river"](${bbox.south},${bbox.west},${bbox.north},${bbox.east});way["highway"~"^(trunk|trunk_link|primary|primary_link)$"](${bbox.south},${bbox.west},${bbox.north},${bbox.east}););out geom;`;
       if(data.osmText){progress('Reading the selected OSM file…');raw=JSON.parse(data.osmText);}
       else {
-        progress('Retrieving public OSM rivers and major roads (up to 45 seconds)…');endpoint=data.server==='fosssgis'?'https://overpass-api.de/api/interpreter':'https://overpass.private.coffee/api/interpreter';
-        const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),45000);try{
-          const response=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/x-www-form-urlencoded'},body:new URLSearchParams({data:query}),signal:controller.signal});
-          if(!response.ok)throw Error('OSM request returned HTTP '+response.status+'. Try again later, or open a saved OSM JSON/GeoJSON file.');
-          if(Number(response.headers.get('Content-Length')||0)>20000000)throw Error('OSM response is too large. Use a smaller area.');
-          const text=await response.text();if(text.length>20000000)throw Error('OSM response is too large.');raw=JSON.parse(text);
-        }catch(e){if(e.name==='AbortError')throw Error('OSM request timed out. Retry later or open saved OSM data.');throw e;}finally{clearTimeout(timer);}
+        const response = await retrieveOverpass(query, data.server, progress);
+        ({ raw, endpoint, attempts: osmAttempts } = response);
       }
       // Overpass can return partial data plus a runtime remark. Never treat it as complete.
       if(raw.remark)throw Error('OSM returned incomplete data: '+String(raw.remark).slice(0,250));
@@ -76,7 +71,7 @@ export function linearWorkerMain(computeLinear) {
         const preview=new Uint8ClampedArray(width*height*4);for(let i=0;i<layer.length;i++){const v=layer[i];if(v===-9999)continue;const f=max===min?0.5:(v-min)/(max-min);preview.set([Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f),255],i*4);}
         const output=writeFloatTIFF(layer,width,height,dx,dy,origin,epsg);products.push({name,tiff:output,preview:preview.buffer,summary:{min:count?min:null,max:count?max:null,mean:count?sum/count:null,validCells:count,unit:units[name]}});transfer.push(output,preview.buffer);
       }
-      self.postMessage({type:'complete',products,vectors:{type:'FeatureCollection',features},report:{schemaVersion:1,stage:'roads and rivers',status:result.warnings.length?'completed_with_warnings':'completed',sourceSHA256,source:data.source,osmSource:data.osmText?'selected file':'Overpass API',osmTimestamp:raw.osm3s?.timestamp_osm_base||null,processedAt:new Date().toISOString(),endpoint,query: data.osmText?null:query,queryBounds:bbox,width,height,crs:'EPSG:'+epsg,transform:{scaleX:dx,scaleY:-dy,translateX:origin[0],translateY:origin[1]},nodata:-9999,validCells:result.validCells,diagnostics:result.diagnostics,featureCounts:{roads:roads.length,rivers:rivers.length},warnings:result.warnings,
+      self.postMessage({type:'complete',products,vectors:{type:'FeatureCollection',features},report:{schemaVersion:1,stage:'roads and rivers',status:result.warnings.length?'completed_with_warnings':'completed',sourceSHA256,source:data.source,osmSource:data.osmText?'selected file':'Overpass API',osmTimestamp:raw.osm3s?.timestamp_osm_base||null,processedAt:new Date().toISOString(),endpoint,osmAttempts,query: data.osmText?null:query,queryBounds:bbox,width,height,crs:'EPSG:'+epsg,transform:{scaleX:dx,scaleY:-dy,translateX:origin[0],translateY:origin[1]},nodata:-9999,validCells:result.validCells,diagnostics:result.diagnostics,featureCounts:{roads:roads.length,rivers:rivers.length},warnings:result.warnings,
         methods:{roads:'OSM ways: trunk, trunk_link, primary, primary_link',rivers:'OSM ways: waterway=river',mask:'Capsule line buffer of max(5 m, half a cell); burn every touched pixel',distance:'Exact Euclidean distance between buffered raster-cell centres, in metres',density:'200 m target odd box window, followed by Gaussian sigma=max(1,window/6), truncate=4, half-sample reflect boundaries'},products:Object.fromEntries(products.map(p=>[p.name,p.summary])),seconds:(performance.now()-started)/1000,
         limitations:['Search covers the DEM plus approximately 1 km; features beyond the search bounds are omitted.','Distances are to buffered raster pixels, not exact vector centrelines.','OSM coverage varies. Missing mapped features do not establish absence of roads or rivers.','Only OSM ways are retrieved; relation-only features are omitted.','River density is a smoothed pixel fraction, not river length per square kilometre.','Desktop equivalence has not been established; rasterisation and buffered query extents may differ.','Selected OSM files must cover the search area; their completeness cannot be established automatically.']}},transfer);
     }catch(e){self.postMessage({type:'error',message: 'Roads/rivers: '+String(e.message||e).slice(0,600)});}

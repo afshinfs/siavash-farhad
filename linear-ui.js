@@ -28,9 +28,9 @@ async function runLinear(){
   linearMessage('Starting the linear worker…');
   try{
     const buffer=await linearSource.arrayBuffer();if(epoch!==linearEpoch)return;
-    const body='('+linearWorkerMain.toString()+')('+computeLinear.toString()+');';
+    const body='('+linearWorkerMain.toString()+')('+computeLinear.toString()+','+retrieveOverpass.toString()+');';
     const url=URL.createObjectURL(new Blob([body],{type:'text/javascript'}));linearWorker=new Worker(url);URL.revokeObjectURL(url);
-    const timeout=linearTimer=setTimeout(()=>{if(epoch===linearEpoch){stopLinear();linearMessage('Road/river processing timed out. Try a smaller area.',true);}},90000);
+    const timeout=linearTimer=setTimeout(()=>{if(epoch===linearEpoch){stopLinear();linearMessage('Road/river processing timed out. Try a smaller area.',true);}},110000);
     linearWorker.onmessage=({data})=>{
       if(epoch!==linearEpoch)return;
       if(data.type==='progress'){linearMessage(data.message);return;}
