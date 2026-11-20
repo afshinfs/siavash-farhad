@@ -86,6 +86,9 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   let localLayers = new Map();
   let current = null;
   let report = null;
+  let checkedInputs = null;
+  let trainingReport = null;
+  const exportURLs = [];
 
   function message(text, error = false) {
     field('status').textContent = text;
@@ -95,11 +98,26 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     const { dem } = readSession();
     field('source').textContent = localDEM ? 'Local DEM · ' + localDEM.name
       : dem ? 'Using the current WebGIS DEM.' : 'Retrieve a DEM above or open a local DEM here.';
+    field('train').disabled = Boolean(current) || !report?.passed ||
+      report.targetResults.some(target => target.occupiedBlocks < 5);
     field('run').disabled = Boolean(current) || !(localDEM || dem);
     field('cancel').disabled = !current;
+    field('cancel').textContent = current?.training ? 'Cancel training' : 'Cancel check';
     field('clear').disabled = Boolean(current) || !(localDEM || localLayers.size);
     field('dem').disabled = Boolean(current);
     field('layers').disabled = Boolean(current);
+  }
+  function trainingMessage(text, error = false) {
+    field('training-status').textContent = text;
+    field('training-status').classList.toggle('error', error);
+  }
+  function clearTraining() {
+    exportURLs.splice(0).forEach(url => URL.revokeObjectURL(url));
+    trainingReport = null;
+    field('models').replaceChildren();
+    field('training-report').disabled = true;
+    field('training-results').hidden = true;
+    trainingMessage('');
   }
   function invalidate() {
     current?.controller.abort();
@@ -107,6 +125,8 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     current = null;
     if (report) message('Inputs changed. Run the check again.');
     report = null;
+    checkedInputs = null;
+    clearTraining();
     field('report').disabled = true;
     field('results').hidden = true;
     refresh();
@@ -114,6 +134,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   function appendRow(tableBody, values) {
     const row = tableBody.insertRow();
     for (const value of values) row.insertCell().textContent = value ?? '—';
+    return row;
   }
   function showReport() {
     const targets = field('targets');
@@ -171,6 +192,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
         demSource: localDEM?.name ?? 'Current WebGIS DEM', demSHA256: prepared.sourceSHA256, grid: prepared.grid,
         demCells: prepared.validCells, blockSizeCells: blockSize, wetThresholdM: 0.05, ...result,
       };
+      checkedInputs = { source, entries };
       showReport();
     } catch (error) {
       if (current === job) message(error.message, true);
@@ -182,8 +204,83 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       }
     }
   }
+  function showTraining(result) {
+    trainingReport = { ...result.report, demSHA256: report.demSHA256, grid: report.grid,
+      layers: report.layers, completedAt: new Date().toISOString() };
+    for (const values of trainingReport.results) {
+      const row = appendRow(field('models'), [values.period.toLocaleString(), values.targetCells.toLocaleString(),
+        values.outOfFold.rmseM.toFixed(3), values.outOfFold.r2?.toFixed(3), values.wetPredictionCells.toLocaleString()]);
+      const cell = row.insertCell();
+      for (const item of result.exports.filter(item => item.period === values.period)) {
+        const link = document.createElement('a');
+        link.textContent = item.kind === 'depth' ? 'Depth GeoTIFF' : 'Model JSON';
+        link.download = item.filename;
+        link.href = URL.createObjectURL(new Blob([item.buffer], { type: item.kind === 'depth' ? 'image/tiff' : 'application/json' }));
+        exportURLs.push(link.href);
+        if (cell.childNodes.length) cell.append(' · ');
+        cell.append(link);
+      }
+    }
+    field('training-results').hidden = false;
+    field('training-report').disabled = false;
+    trainingMessage('Four depth models trained. GeoTIFFs and model files are ready.');
+  }
+
+  async function train() {
+    if (field('train').disabled || !checkedInputs) return;
+    clearTraining();
+    const { source, entries } = checkedInputs;
+    const job = { controller: new AbortController(), worker: null, training: true };
+    current = job;
+    refresh();
+    trainingMessage('Preparing the checked raster inputs…');
+    try {
+      const dem = await source.arrayBuffer();
+      if (current !== job) return;
+      const worker = new Worker(new URL('./depth-training-worker.js?v=1', import.meta.url), { type: 'module' });
+      job.worker = worker;
+      function finish(error, result) {
+        if (current !== job) return;
+        worker.terminate();
+        current = null;
+        refresh();
+        if (error) trainingMessage(error, true);
+        else showTraining(result);
+      }
+      worker.onmessage = ({ data }) => {
+        if (current !== job) return;
+        if (data.type === 'progress') trainingMessage(data.message);
+        else if (data.type === 'error') finish(data.message);
+        else if (data.type === 'complete') finish(null, data);
+      };
+      worker.onerror = () => finish('The training worker could not load. Check your connection and try again.');
+      worker.postMessage({
+        dem, entries: entries.map(({name, raster}) => ({name, raster})),
+        config: { blockSize, predictors: Object.keys(predictors),
+          targets: Object.entries(depths).map(([name, period]) => ({name, period})) },
+      }, [dem]);
+    } catch (error) {
+      if (current !== job) return;
+      job.worker?.terminate();
+      current = null;
+      refresh();
+      trainingMessage(error.message, true);
+    }
+  }
+
+  field('train').addEventListener('click', train);
   field('run').addEventListener('click', run);
-  field('cancel').addEventListener('click', () => { invalidate(); message('Raster-stack check cancelled.'); });
+  field('cancel').addEventListener('click', () => {
+    if (current?.training) {
+      current.worker?.terminate();
+      current = null;
+      refresh();
+      trainingMessage('Training cancelled. The raster-stack check is still available.');
+    } else {
+      invalidate();
+      message('Raster-stack check cancelled.');
+    }
+  });
   field('dem').addEventListener('change', event => {
     const file = event.target.files[0];
     event.target.value = '';
@@ -221,13 +318,15 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     invalidate();
     message('Using the current WebGIS session.');
   });
-  field('report').addEventListener('click', () => {
-    if (!report) return;
+  function downloadReport(data, filename) {
+    if (!data) return;
     const link = document.createElement('a');
-    link.href = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));
-    link.download = 'siavash-ml-raster-stack-report.json';
+    link.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+    link.download = filename;
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
-  });
+  }
+  field('report').addEventListener('click', () => downloadReport(report, 'siavash-ml-raster-stack-report.json'));
+  field('training-report').addEventListener('click', () => downloadReport(trainingReport, 'siavash-xgboost-training-report.json'));
   return { refresh, invalidate };
 }

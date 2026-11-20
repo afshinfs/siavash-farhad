@@ -1,4 +1,4 @@
-import { createMLStackPanel } from './ml-stack.mjs?v=1';
+import { createMLStackPanel } from './ml-stack.mjs?v=2';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=3';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
