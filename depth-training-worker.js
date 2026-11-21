@@ -12,7 +12,7 @@ self.onmessage = async ({ data }) => {
   try {
     progress('Loading Python and XGBoost. The first run downloads the browser runtime.');
     const [{ loadPyodide }, helpers, program] = await Promise.all([
-      import(indexURL + 'pyodide.mjs'), readSource('./ml.py'), readSource('./train-depth.py?v=1'),
+      import(indexURL + 'pyodide.mjs'), readSource('./ml.py'), readSource('./train-depth.py?v=2'),
     ]);
     const py = await loadPyodide({ indexURL });
     await py.loadPackage(['numpy', 'scipy', 'scikit-learn', 'xgboost', 'rasterio']);
@@ -35,7 +35,7 @@ sys.path.insert(0, "/")`);
     const report = JSON.parse(await py.runPythonAsync(`
 config = json.loads(training_config)
 json.dumps(train_depth_models("/training", config["predictors"], config["targets"],
-                             config["blockSize"], training_progress), allow_nan=False)
+                             config["blockSize"], training_progress, fold_count=config["foldCount"]), allow_nan=False)
 `));
     const exports = [];
     const transfer = [];

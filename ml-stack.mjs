@@ -98,8 +98,23 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     const { dem } = readSession();
     field('source').textContent = localDEM ? 'Local DEM · ' + localDEM.name
       : dem ? 'Using the current WebGIS DEM.' : 'Retrieve a DEM above or open a local DEM here.';
-    field('train').disabled = Boolean(current) || !report?.passed ||
-      report.targetResults.some(target => target.occupiedBlocks < 5);
+    const foldCount = Number(field('folds').value);
+    const required = report?.passed
+      ? Math.min(...report.targetResults.map(target => target.occupiedBlocks)) : null;
+    field('folds').disabled = Boolean(current);
+    field('train').disabled = Boolean(current) || required === null || required < foldCount;
+    let requirement = 'Pass the raster-stack check before training.';
+    if (required !== null) {
+      if (required >= foldCount) {
+        requirement = 'All return periods meet the ' + foldCount + '-fold requirement.';
+      } else if (required === 4 && foldCount === 5) {
+        requirement = 'At least one return period has only 4 occupied blocks. Select 4 folds to train.';
+      } else {
+        requirement = 'Each return period needs at least ' + foldCount +
+          ' occupied blocks. The lowest count is ' + required + '. Choose a larger study area.';
+      }
+    }
+    field('fold-requirement').textContent = requirement;
     field('run').disabled = Boolean(current) || !(localDEM || dem);
     field('cancel').disabled = !current;
     field('cancel').textContent = current?.training ? 'Cancel training' : 'Cancel check';
@@ -154,10 +169,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       : 'Complete predictor coverage: ' + format(report.predictorCells) + ' of ' + format(report.demCells) + ' valid DEM cells.';
     field('results').hidden = false;
     field('report').disabled = false;
-    const sparse = report.targetResults.filter(result => result.occupiedBlocks !== null && result.occupiedBlocks < 5);
-    const cv = sparse.length ? ' Fewer than five occupied 40-cell blocks for these periods: ' +
-      sparse.map(result => result.period.toLocaleString()).join(', ') + ' years.' : '';
-    message((report.passed ? 'Raster-stack check passed.' : 'Raster-stack check found issues. Review the results below.') + cv, !report.passed);
+    message(report.passed ? 'Raster-stack check passed.' : 'Raster-stack check found issues. Review the results below.', !report.passed);
   }
 
   async function run() {
@@ -223,13 +235,14 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     }
     field('training-results').hidden = false;
     field('training-report').disabled = false;
-    trainingMessage('Four depth models trained. GeoTIFFs and model files are ready.');
+    trainingMessage('Four depth models trained with ' + trainingReport.crossValidation.folds + ' spatial folds. GeoTIFFs and model files are ready.');
   }
 
   async function train() {
     if (field('train').disabled || !checkedInputs) return;
     clearTraining();
     const { source, entries } = checkedInputs;
+    const foldCount = Number(field('folds').value);
     const job = { controller: new AbortController(), worker: null, training: true };
     current = job;
     refresh();
@@ -237,7 +250,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     try {
       const dem = await source.arrayBuffer();
       if (current !== job) return;
-      const worker = new Worker(new URL('./depth-training-worker.js?v=1', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('./depth-training-worker.js?v=2', import.meta.url), { type: 'module' });
       job.worker = worker;
       function finish(error, result) {
         if (current !== job) return;
@@ -256,7 +269,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       worker.onerror = () => finish('The training worker could not load. Check your connection and try again.');
       worker.postMessage({
         dem, entries: entries.map(({name, raster}) => ({name, raster})),
-        config: { blockSize, predictors: Object.keys(predictors),
+        config: { blockSize, foldCount, predictors: Object.keys(predictors),
           targets: Object.entries(depths).map(([name, period]) => ({name, period})) },
       }, [dem]);
     } catch (error) {
@@ -268,6 +281,10 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     }
   }
 
+  field('folds').addEventListener('change', () => {
+    clearTraining();
+    refresh();
+  });
   field('train').addEventListener('click', train);
   field('run').addEventListener('click', run);
   field('cancel').addEventListener('click', () => {

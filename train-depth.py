@@ -14,7 +14,6 @@ from ml import build_design_matrix, _spatial_groups, _write_float32_like
 
 MODEL_OPTIONS = dict(objective="reg:squarederror", tree_method="hist", n_estimators=120,
                      max_depth=4, learning_rate=0.08, max_bin=128, n_jobs=1, random_state=42)
-FOLDS = 5
 WET_DEPTH = np.float32(0.05)
 
 
@@ -46,7 +45,9 @@ def predict_depth(model, x):
     return np.maximum(predicted, 0)
 
 
-def train_depth_models(folder, predictors, targets, block_size, progress):
+def train_depth_models(folder, predictors, targets, block_size, progress, *, fold_count=5):
+    if fold_count not in (4, 5):
+        raise ValueError("Select four or five spatial folds.")
     root = Path(folder)
     dem_path = root / "dem.tif"
     dem, grid = read_grid_layer(dem_path)
@@ -70,12 +71,12 @@ def train_depth_models(folder, predictors, targets, block_size, progress):
         eligible = np.isfinite(target_values)
         x_fit, y_fit, fit_groups = x[eligible], target_values[eligible], groups[eligible]
         block_count = int(np.unique(fit_groups).size)
-        if block_count < FOLDS:
-            raise ValueError(f"The {period}-year target needs at least {FOLDS} occupied spatial blocks.")
+        if block_count < fold_count:
+            raise ValueError(f"The {period}-year target needs at least {fold_count} occupied spatial blocks.")
         out_of_fold = np.full(y_fit.shape, np.nan, dtype=np.float32)
         fold_scores = []
-        for fold, (train, test) in enumerate(GroupKFold(n_splits=FOLDS).split(x_fit, y_fit, fit_groups), 1):
-            progress(f"{period:,}-year model · spatial fold {fold} of {FOLDS}")
+        for fold, (train, test) in enumerate(GroupKFold(n_splits=fold_count).split(x_fit, y_fit, fit_groups), 1):
+            progress(f"{period:,}-year model · spatial fold {fold} of {fold_count}")
             model = XGBRegressor(**MODEL_OPTIONS).fit(x_fit[train], y_fit[train])
             predicted = predict_depth(model, x_fit[test])
             out_of_fold[test] = predicted
@@ -102,7 +103,7 @@ def train_depth_models(folder, predictors, targets, block_size, progress):
     return {
         "schemaVersion": 1, "stage": "XGBoost flood-depth modelling",
         "predictorOrder": names, "modelParameters": MODEL_OPTIONS,
-        "crossValidation": {"folds": FOLDS, "blockSizeCells": block_size, "method": "GroupKFold",
+        "crossValidation": {"folds": fold_count, "blockSizeCells": block_size, "method": "GroupKFold",
                             "metrics": "Pooled out-of-fold predictions against GloFAS-derived targets"},
         "output": {"depthUnits": "m", "minimumDepth": 0, "wetThresholdM": 0.05, "nodata": -9999},
         "packages": {"xgboost": xgboost.__version__, "scikitLearn": sklearn.__version__, "rasterio": rasterio.__version__},
