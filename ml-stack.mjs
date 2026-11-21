@@ -78,7 +78,7 @@ export async function auditRasterStack({ predictorNames, targets, entries, block
   return { layers: layerResults, predictorCells, targetResults, passed: targetResults.every(result => result.status === 'valid') };
 }
 
-export function createMLStackPanel({ element, readSession, rasterWorker, callWorker }) {
+export function createMLStackPanel({ element, readSession, rasterWorker, callWorker, onWeaklineInputsChange }) {
   const field = name => element('ml-stack-' + name);
   const blockSize = 40;
   const wetThreshold = Math.fround(0.05);
@@ -88,6 +88,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   let report = null;
   let checkedInputs = null;
   let trainingReport = null;
+  let trainedDepths = null;
   const exportURLs = [];
 
   function message(text, error = false) {
@@ -133,6 +134,8 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     field('training-report').disabled = true;
     field('training-results').hidden = true;
     trainingMessage('');
+    trainedDepths = null;
+    onWeaklineInputsChange?.();
   }
   function invalidate() {
     current?.controller.abort();
@@ -235,6 +238,9 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     }
     field('training-results').hidden = false;
     field('training-report').disabled = false;
+    trainedDepths = Object.fromEntries(result.exports.filter(item => item.kind === 'depth')
+      .map(item => [item.period, item.buffer]));
+    onWeaklineInputsChange?.();
     trainingMessage('Four depth models trained with ' + trainingReport.crossValidation.folds + ' spatial folds. GeoTIFFs and model files are ready.');
   }
 
@@ -343,5 +349,14 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   }
   field('report').addEventListener('click', () => downloadReport(report, 'siavash-ml-raster-stack-report.json'));
   field('training-report').addEventListener('click', () => downloadReport(trainingReport, 'siavash-xgboost-training-report.json'));
-  return { refresh, invalidate };
+  function getWeaklineInputs() {
+    const { dem, layers } = readSession();
+    const get = name => localLayers.get(name) ?? layers.find(layer => layer.name === name)?.tiff;
+    return {
+      dem: localDEM ?? dem, terrain: get('dem_filled'), riverDistance: get('river_distance'),
+      referenceDepths: Object.fromEntries(targetPeriods.map(period => [period, get('RP' + period + '_depth')])),
+      trainedDepths,
+    };
+  }
+  return { refresh, invalidate, getWeaklineInputs };
 }

@@ -1,4 +1,5 @@
-import { createMLStackPanel } from './ml-stack.mjs?v=4';
+import { createMLStackPanel } from './ml-stack.mjs?v=5';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=1';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=3';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
@@ -466,6 +467,7 @@ function setTerrainSource(blob,info=null){
   setHydroSource(blob,info);
   stopTerrain();clearTerrainProducts();terrainSource=blob;terrainSourceInfo=info;
   mlStackPanel.refresh();
+  weaklinePanel.refresh();
   el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
   el('terrain-run').disabled=!blob;terrainMessage(blob?'Elevation is ready for terrain processing.':'Terrain processing runs locally in your browser.');
 }
@@ -977,7 +979,7 @@ async function requestSatellite({project,accessToken,expression,grid=null,bands=
 }
 
 /** Source decoding/worker. Google credentials never enter this worker. */
-function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null){
+function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg,nodata='-9999'){
@@ -1010,6 +1012,21 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
     if(dem&&image.getSamplesPerPixel()!==1)throw Error('The DEM must have one band.');
     return {image,width,height,origin,dx,dy,epsg};
   }
+  async function readAlignedValues(raster, maskToDEM = false) {
+    const buffer = raster instanceof Blob ? await raster.arrayBuffer() : raster;
+    const t = await readGrid(buffer);
+    const s = template;
+    if (t.width !== s.width || t.height !== s.height || t.epsg !== s.epsg ||
+        Math.abs(t.dx - s.dx) > 1e-8 || Math.abs(t.dy - s.dy) > 1e-8 ||
+        Math.abs(t.origin[0] - s.origin[0]) > 1e-6 || Math.abs(t.origin[1] - s.origin[1]) > 1e-6) {
+      throw Error('CRS, dimensions, cell size, or origin differs from the DEM.');
+    }
+    if (t.image.getSamplesPerPixel() !== 1) throw Error('A single-band GeoTIFF is required.');
+    const values = await t.image.readRasters({ samples: [0], interleave: true });
+    const nodata = t.image.getGDALNoData();
+    return Float32Array.from(values, (value, i) =>
+      (!maskToDEM || s.mask[i]) && Number.isFinite(value) && value !== nodata ? value : NaN);
+  }
   self.onmessage=async({data})=>{
     try{
       if(data.action==='prepare'){
@@ -1031,26 +1048,69 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         if(!template||!auditRasterStack)throw Error('Prepare a DEM before checking the raster stack.');
         const normalized = [];
         const readAlignedRaster = async (raster, name) => {
-          const buffer = raster instanceof Blob ? await raster.arrayBuffer() : raster;
-          const t = await readGrid(buffer);
+          const values = await readAlignedValues(raster);
           const s = template;
-          if (t.width !== s.width || t.height !== s.height || t.epsg !== s.epsg ||
-              Math.abs(t.dx - s.dx) > 1e-8 || Math.abs(t.dy - s.dy) > 1e-8 ||
-              Math.abs(t.origin[0] - s.origin[0]) > 1e-6 || Math.abs(t.origin[1] - s.origin[1]) > 1e-6) {
-            throw Error('CRS, dimensions, cell size, or origin differs from the DEM.');
-          }
-          if (t.image.getSamplesPerPixel() !== 1) throw Error('A single-band GeoTIFF is required.');
-          const values = await t.image.readRasters({ samples: [0], interleave: true });
-          const tag = t.image.getGDALNoData();
-          const nodata = tag === null ? null : Number(tag);
-          const clean = Float32Array.from(values, value => Number.isFinite(value) && value !== nodata ? value : NaN);
-          const encoded = writeFloatTIFF(clean,s.width,s.height,s.dx,s.dy,s.origin,s.epsg,'nan');
+          const encoded = writeFloatTIFF(values,s.width,s.height,s.dx,s.dy,s.origin,s.epsg,'nan');
           normalized.push({ name, raster: encoded });
-          return { values: clean, nodata: null };
+          return { values, nodata: null };
         };
         const result = await auditRasterStack(data, template, readAlignedRaster);
         const trainingEntries = result.passed ? normalized : [];
         self.postMessage({ result, trainingEntries }, trainingEntries.map(entry => entry.raster));
+        return;
+      }
+      if (data.action === 'screenWeaklines' || data.action === 'compareClosure') {
+        if (!template) throw Error('Prepare the DEM before processing weaklines.');
+        const { width, height, origin, dx, dy, epsg, mask } = template;
+        async function read(raster, label) {
+          const values = await readAlignedValues(raster, true).catch(error => { throw Error(label + ' · ' + error.message); });
+          if (!values.some(Number.isFinite)) throw Error(label + ' has no valid cells on the DEM grid.');
+          return values;
+        }
+        if (data.action === 'screenWeaklines') {
+          const { settings, reference, depthByPeriod } = data;
+          const referenceValues = await read(reference, settings.method === 'depth25' ? '25-year reference' : 'River distance');
+          const corridor = Int8Array.from(referenceValues, value => {
+            if (!Number.isFinite(value) || value < 0) return -1;
+            return Number(settings.method === 'depth25' ? value > 1 : value <= settings.bufferM);
+          });
+          const depths = {};
+          for (const [period, raster] of Object.entries(depthByPeriod)) {
+            depths[period] = await read(raster, period + '-year depth');
+            if (depths[period].some(value => value < 0)) throw Error(period + '-year depth contains negative values.');
+          }
+          const candidates = screenWeaklines({ width, height, dx, corridor,
+            depthByPeriod: depths, thresholdM: settings.thresholdM, minimumM: settings.minimumM });
+          const projection = `+proj=utm +zone=${epsg % 100} ${epsg >= 32700 ? '+south ' : ''}+datum=WGS84 +units=m +no_defs`;
+          const convert = proj4(projection, 'EPSG:4326');
+          const vertex = id => convert.forward([
+            origin[0] + (id % (width + 1)) * dx, origin[1] - Math.floor(id / (width + 1)) * dy,
+          ]);
+          const features = candidates.map(({ id, period, lengthM, segments }) => ({
+            type: 'Feature', id, properties: { id, firstScreenedPeriodYears: period, lengthM },
+            geometry: { type: 'MultiLineString', coordinates: segments.map(edge => edge.map(vertex)) },
+          }));
+          const coverage = { demCells: mask.reduce((sum, valid) => sum + valid, 0),
+            corridorCells: corridor.reduce((sum, value) => sum + Number(value === 1), 0),
+            missingCorridorCells: corridor.reduce((sum, value, i) => sum + Number(mask[i] && value < 0), 0),
+            validDepthCells: Object.fromEntries(Object.entries(depths).map(([period, values]) =>
+              [period, values.reduce((sum, value) => sum + Number(Number.isFinite(value)), 0)])),
+          };
+          self.postMessage({ features, coverage, candidates: candidates.map(({ id, period, cells }) => ({ id, period, cells })) });
+        } else {
+          const terrain = await read(data.terrain, 'Filled DEM');
+          const inputDepth = await read(data.depth, 'Scenario depth');
+          const riverDistance = data.riverDistance ? await read(data.riverDistance, 'River distance') : new Float32Array(width * height).fill(NaN);
+          let cap = 0;
+          for (const value of inputDepth) if (Number.isFinite(value)) cap = Math.max(cap, value);
+          cap += 2;
+          const { metrics, ...outputs } = compareWeaklineClosure({
+            width, height, dx, terrain, inputDepth, riverDistance, barrierCells: data.barrierCells, cap,
+          });
+          const rasters = Object.fromEntries(Object.entries(outputs).map(([name, values]) =>
+            [name, writeFloatTIFF(values, width, height, dx, dy, origin, epsg, 'nan')]));
+          self.postMessage({ metrics, rasters, cap }, Object.values(rasters));
+        }
         return;
       }
       if(data.action==='product'){
@@ -2419,8 +2479,15 @@ const floodDepthPanel = createFloodDepthPanel({
 });
 floodDepthPanel.refresh();
 
+const weaklinePanel = createWeaklinePanel({
+  element: el,
+  readInputs: () => mlStackPanel.getWeaklineInputs(),
+  rasterWorker: satelliteWorkerMain,
+  callWorker: callAlignedRasterWorker,
+});
 const mlStackPanel = createMLStackPanel({
   element: el,
+  onWeaklineInputsChange: () => weaklinePanel.invalidate(),
   readSession: () => ({
     dem: terrainSource,
     layers: [...terrainProducts, ...hydroProducts, ...linearProducts, ...satProducts, ...floodDepthPanel.getProducts()],
@@ -2429,6 +2496,7 @@ const mlStackPanel = createMLStackPanel({
   callWorker: callAlignedRasterWorker,
 });
 mlStackPanel.refresh();
+weaklinePanel.invalidate();
 
 // Keep the request independent of the worker so the failover rules can be tested.
 async function retrieveOverpass(query, mode, progress, fetchImpl = fetch, timeoutMs = 45000) {
