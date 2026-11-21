@@ -155,11 +155,11 @@ export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth,
   } };
 }
 
-export function createWeaklinePanel({ element, readInputs, rasterWorker, callWorker }) {
+export function createWeaklinePanel({ element, readInputs, rasterWorker, callWorker, onClosureChange }) {
   const field = name => element('weakline-' + name);
   const periods = [30, 100, 300, 1000];
   const colors = { 30: '#a52935', 100: '#a65c00', 300: '#166879', 1000: '#61439a' };
-  let active = null, result = null, comparison = null, map = null, overlay = null;
+  let active = null, result = null, comparison = null, closureOutput = null, map = null, overlay = null;
   const selected = new Set();
   const urls = [];
 
@@ -211,6 +211,10 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   }
   function clearComparison() {
     comparison = null;
+    if (closureOutput) {
+      closureOutput = null;
+      onClosureChange?.();
+    }
     urls.splice(0).forEach(url => URL.revokeObjectURL(url));
     field('exports').replaceChildren();
     field('comparison').hidden = true;
@@ -346,7 +350,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   field('closure').addEventListener('click', async () => {
     if (field('closure').disabled) return;
     clearComparison();
-    const { dem, terrain, depths, riverDistance } = sourceInputs();
+    const { dem, terrain, depths, riverDistance, predicted } = sourceInputs();
     const period = Number(field('period').value);
     const ids = [...selected].sort((a, b) => a - b);
     const candidates = result.candidates.filter(candidate => selected.has(candidate.id));
@@ -390,6 +394,8 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       urls.push(link.href);
       field('exports').append(link);
     }
+    closureOutput = { period, candidateIds: ids, predicted, depth: rasters.closure, demSHA256: output.prepared.sourceSHA256 };
+    onClosureChange?.();
     field('comparison').hidden = false;
     status(period.toLocaleString() + '-year closure comparison complete.');
   });
@@ -410,5 +416,5 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   });
   field('report').addEventListener('click', () => { if (result) download(result.report, 'siavash-weakline-screening.json'); });
   field('closure-report').addEventListener('click', () => { if (comparison) download(comparison, 'siavash-weakline-closure.json'); });
-  return { invalidate, refresh };
+  return { invalidate, refresh, getClosure: () => closureOutput };
 }

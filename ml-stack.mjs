@@ -349,15 +349,15 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   }
   field('report').addEventListener('click', () => downloadReport(report, 'siavash-ml-raster-stack-report.json'));
   field('training-report').addEventListener('click', () => downloadReport(trainingReport, 'siavash-xgboost-training-report.json'));
-  function getWeaklineInputs() {
+  function getFloodAnalysisInputs() {
     const { dem, layers } = readSession();
     const get = name => localLayers.get(name) ?? layers.find(layer => layer.name === name)?.tiff;
     return {
       dem: localDEM ?? dem, terrain: get('dem_filled'), riverDistance: get('river_distance'),
-      fittedDepth25: get('RP25_depth'),
+      fittedDepth25: get('RP25_depth'), slope: get('slope'), manning: get('manning'),
       referenceDepths: Object.fromEntries(targetPeriods.map(period => [period, get('RP' + period + '_depth')])),
       trainedDepths,
     };
   }
-  return { refresh, invalidate, getWeaklineInputs };
+  return { refresh, invalidate, getFloodAnalysisInputs };
 }

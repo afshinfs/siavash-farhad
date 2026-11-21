@@ -1,5 +1,6 @@
-import { createMLStackPanel } from './ml-stack.mjs?v=6';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=2';
+import { createHazardPanel } from './hazard.mjs?v=1';
+import { createMLStackPanel } from './ml-stack.mjs?v=7';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=3';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=4';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
@@ -468,6 +469,7 @@ function setTerrainSource(blob,info=null){
   stopTerrain();clearTerrainProducts();terrainSource=blob;terrainSourceInfo=info;
   mlStackPanel.refresh();
   weaklinePanel.refresh();
+  hazardPanel.refresh();
   el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
   el('terrain-run').disabled=!blob;terrainMessage(blob?'Elevation is ready for terrain processing.':'Terrain processing runs locally in your browser.');
 }
@@ -979,7 +981,7 @@ async function requestSatellite({project,accessToken,expression,grid=null,bands=
 }
 
 /** Source decoding/worker. Google credentials never enter this worker. */
-function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null){
+function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null,computeHazards=null){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg,nodata='-9999'){
@@ -1057,6 +1059,48 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         const result = await auditRasterStack(data, template, readAlignedRaster);
         const trainingEntries = result.passed ? normalized : [];
         self.postMessage({ result, trainingEntries }, trainingEntries.map(entry => entry.raster));
+        return;
+      }
+      if (data.action === 'hazard') {
+        if (!template || !computeHazards) throw Error('Prepare the DEM before calculating hazard.');
+        const { width, height, dx, dy, origin, epsg } = template;
+        async function read(raster, label) {
+          try {
+            const values = await readAlignedValues(raster, true);
+            if (!values.some(Number.isFinite)) throw Error('No valid cells on the DEM grid.');
+            return values;
+          } catch (error) {
+            throw Error(label + ' · ' + error.message);
+          }
+        }
+        const [slope, manning] = await Promise.all([read(data.slope, 'Slope'), read(data.manning, 'Manning n')]);
+        const depths = {};
+        for (const period of data.periods) {
+          const values = await read(data.depths[period], period + '-year depth');
+          if (values.some(value => value < 0)) throw Error(period + '-year depth contains negative values.');
+          depths[period] = values;
+        }
+        const closure = data.closure ? {
+          period: data.closure.period,
+          depth: await read(data.closure.depth, data.closure.period + '-year closure depth'),
+        } : null;
+        const { rasters, coverage } = computeHazards({
+          width, height, periods: data.periods, depths, slope, manning, closure, clean: data.clean,
+        });
+        const products = {}, transfer = [];
+        for (const [name, values] of Object.entries(rasters)) {
+          let max = -Infinity, min = Infinity, validCells = 0;
+          for (const value of values) {
+            if (!Number.isFinite(value)) continue;
+            validCells++;
+            max = Math.max(max, value);
+            min = Math.min(min, value);
+          }
+          const tiff = writeFloatTIFF(values, width, height, dx, dy, origin, epsg, 'nan');
+          products[name] = { tiff, values: values.buffer, summary: { validCells, min: validCells ? min : null, max: validCells ? max : null } };
+          transfer.push(tiff, values.buffer);
+        }
+        self.postMessage({ products, coverage }, [...new Set(transfer)]);
         return;
       }
       if (data.action === 'screenWeaklines' || data.action === 'compareClosure') {
@@ -2482,13 +2526,21 @@ floodDepthPanel.refresh();
 
 const weaklinePanel = createWeaklinePanel({
   element: el,
-  readInputs: () => mlStackPanel.getWeaklineInputs(),
+  readInputs: () => mlStackPanel.getFloodAnalysisInputs(),
+  onClosureChange: () => hazardPanel.closureChanged(),
+  rasterWorker: satelliteWorkerMain,
+  callWorker: callAlignedRasterWorker,
+});
+const hazardPanel = createHazardPanel({
+  element: el,
+  readInputs: () => mlStackPanel.getFloodAnalysisInputs(),
+  readClosure: () => weaklinePanel.getClosure(),
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,
 });
 const mlStackPanel = createMLStackPanel({
   element: el,
-  onWeaklineInputsChange: () => weaklinePanel.invalidate(),
+  onWeaklineInputsChange: () => { weaklinePanel.invalidate(); hazardPanel.invalidate(); },
   readSession: () => ({
     dem: terrainSource,
     layers: [...terrainProducts, ...hydroProducts, ...linearProducts, ...satProducts, ...floodDepthPanel.getProducts()],
@@ -2498,6 +2550,7 @@ const mlStackPanel = createMLStackPanel({
 });
 mlStackPanel.refresh();
 weaklinePanel.invalidate();
+hazardPanel.refresh();
 
 // Keep the request independent of the worker so the failover rules can be tested.
 async function retrieveOverpass(query, mode, progress, fetchImpl = fetch, timeoutMs = 45000) {
