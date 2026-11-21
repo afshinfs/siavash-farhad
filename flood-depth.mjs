@@ -1,6 +1,6 @@
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
-const gumbelPeriods = [30, 300, 1000];
+const gumbelPeriods = [25, 30, 300, 1000];
 
 export function buildFloodRequest(periods, { maskSpurious, maskWater }, { bounds, grid }) {
   if (!periods.length || new Set(periods).size !== periods.length ||
@@ -212,7 +212,8 @@ const fit = ${fitGumbelDepths.toString()};
         demValidCells: prepared.validCells, periods, requestedSourcePeriods: inputs, settings, nodata: -9999,
         resampling: 'Earth Engine bilinear on the DEM grid', processedAt: new Date().toISOString(),
         ...(targets.length && { gumbel: {
-          interpolationPeriods: [30, 300], extrapolationPeriods: [1000],
+          interpolationPeriods: targets.filter(period => period <= inputs.at(-1)),
+          extrapolationPeriods: targets.filter(period => period > inputs.at(-1)),
           method: 'Pixel-wise ordinary least squares of depth on -ln(-ln(1 - 1/T)). All seven source values required. Negative fitted depths are set to zero. Slopes are unconstrained.',
         } }),
         products: Object.fromEntries(products.map(product => [product.name, product.summary])),
@@ -220,7 +221,8 @@ const fit = ${fitGumbelDepths.toString()};
       };
       for (const product of products) {
         const period = Number(product.name.match(/^RP(\d+)_depth$/)[1]);
-        const method = targets.includes(period) ? (period === 1000 ? 'Gumbel extrapolation' : 'Gumbel interpolation') : 'GloFAS';
+        const method = targets.includes(period)
+          ? (period > inputs.at(-1) ? 'Gumbel extrapolation' : 'Gumbel interpolation') : 'GloFAS';
         report.products[product.name].method = method;
         if (!product.summary.validCells) {
           report.periodsWithoutValidData.push(period);

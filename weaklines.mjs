@@ -167,25 +167,30 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     const inputs = readInputs();
     const predicted = field('source').value === 'trained';
     const method = field('method').value;
+    const localDepth25 = field('depth25').files[0];
     return {
       ...inputs, method, predicted,
-      reference: method === 'depth25' ? field('depth25').files[0] : inputs.riverDistance,
+      reference: method === 'depth25' ? localDepth25 ?? inputs.fittedDepth25 : inputs.riverDistance,
+      referenceSource: method === 'depth25'
+        ? (localDepth25 ? 'Local 25-year depth GeoTIFF' : 'GloFAS Gumbel interpolation') : 'River distance',
       depths: predicted ? inputs.trainedDepths : inputs.referenceDepths,
     };
   }
   function refresh() {
     const { dem, method, reference, depths, terrain } = sourceInputs();
     const waiting = !dem ? 'Provide a DEM above.'
-      : !reference ? method === 'depth25' ? 'Choose an aligned 25-year depth GeoTIFF.'
+      : !reference ? method === 'depth25' ? 'Enable the Gumbel fit under Retrieve reference flood depths, or choose an aligned 25-year GeoTIFF here.'
         : 'Calculate river distance above or open an aligned river_distance GeoTIFF in the raster stack.'
       : !periods.every(period => depths?.[period]) ? 'Provide all four depth rasters for the selected source.'
       : '';
     const selectedCandidates = result?.candidates.filter(candidate => selected.has(candidate.id)) ?? [];
     const period = Number(field('period').value);
     const tooEarly = selectedCandidates.some(candidate => candidate.period > period);
-    field('ready').textContent = waiting;
+    field('ready').textContent = waiting || (method === 'depth25'
+      ? 'Using ' + (reference instanceof File ? reference.name : 'the fitted 25-year depth from GloFAS') + '.' : '');
     field('buffer').disabled = Boolean(active) || method !== 'river';
     field('depth25').disabled = Boolean(active) || method !== 'depth25';
+    field('footprint-threshold').disabled = Boolean(active) || method !== 'depth25';
     for (const name of ['source', 'method', 'threshold', 'minimum', 'period', 'candidate']) {
       field(name).disabled = Boolean(active);
     }
@@ -294,15 +299,16 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     map.fitBounds([[bounds.south, bounds.west], [bounds.north, bounds.east]], { padding: [16, 16], maxZoom: 17 });
   }
   field('run').addEventListener('click', async () => {
-    const { dem, reference, depths, method, predicted } = sourceInputs();
+    const { dem, reference, referenceSource, depths, method, predicted } = sourceInputs();
     const settings = {
       method, depthSource: predicted ? 'XGBoost predictions' : 'GloFAS reference depths',
       bufferM: method === 'river' ? field('buffer').valueAsNumber : null,
-      referenceDepthThresholdM: method === 'depth25' ? 1 : null,
+      referenceDepthThresholdM: method === 'depth25' ? field('footprint-threshold').valueAsNumber : null,
+      referenceSource,
       referenceFile: reference instanceof File ? reference.name : null,
       thresholdM: field('threshold').valueAsNumber, minimumM: field('minimum').valueAsNumber,
     };
-    const controls = ['threshold', 'minimum', ...(method === 'river' ? ['buffer'] : [])];
+    const controls = ['threshold', 'minimum', method === 'river' ? 'buffer' : 'footprint-threshold'];
     const invalid = controls.find(name => !field(name).checkValidity());
     if (invalid) {
       field(invalid).reportValidity();
@@ -389,7 +395,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   });
   field('toggle').addEventListener('click', () => toggle(Number(field('candidate').value)));
   field('period').addEventListener('change', () => { clearComparison(); status(''); refresh(); });
-  for (const name of ['method', 'source', 'depth25', 'buffer', 'threshold', 'minimum']) {
+  for (const name of ['method', 'source', 'depth25', 'footprint-threshold', 'buffer', 'threshold', 'minimum']) {
     field(name).addEventListener('change', invalidate);
   }
   field('cancel').addEventListener('click', () => {

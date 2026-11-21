@@ -1,6 +1,6 @@
-import { createMLStackPanel } from './ml-stack.mjs?v=5';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=1';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=3';
+import { createMLStackPanel } from './ml-stack.mjs?v=6';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=2';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=4';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -1070,9 +1070,10 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         if (data.action === 'screenWeaklines') {
           const { settings, reference, depthByPeriod } = data;
           const referenceValues = await read(reference, settings.method === 'depth25' ? '25-year reference' : 'River distance');
+          const footprintThreshold = Math.fround(settings.referenceDepthThresholdM);
           const corridor = Int8Array.from(referenceValues, value => {
             if (!Number.isFinite(value) || value < 0) return -1;
-            return Number(settings.method === 'depth25' ? value > 1 : value <= settings.bufferM);
+            return Number(settings.method === 'depth25' ? value > footprintThreshold : value <= settings.bufferM);
           });
           const depths = {};
           for (const [period, raster] of Object.entries(depthByPeriod)) {
