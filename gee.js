@@ -1,4 +1,4 @@
-import { createMLStackPanel } from './ml-stack.mjs?v=3';
+import { createMLStackPanel } from './ml-stack.mjs?v=4';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=3';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
@@ -980,7 +980,7 @@ async function requestSatellite({project,accessToken,expression,grid=null,bands=
 function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
-  function writeFloatTIFF(values,width,height,dx,dy,origin,epsg){
+  function writeFloatTIFF(values,width,height,dx,dy,origin,epsg,nodata='-9999'){
     // Baseline little-endian TIFF: one uncompressed float32 strip and explicit GeoKeys.
     const entries=[
       [256,4,[width]],[257,4,[height]],[258,3,[32]],[259,3,[1]],
@@ -988,7 +988,7 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
       [279,4,[values.length*4]],[284,3,[1]],[339,3,[3]],
       [33550,12,[dx,dy,0]],[33922,12,[0,0,0,origin[0],origin[1],0]],
       [34735,3,[1,1,0,4,1024,0,1,1,1025,0,1,1,3072,0,1,epsg,3076,0,1,9001]],
-      [42113,2,Array.from('-9999\0',c=>c.charCodeAt(0))]
+      [42113,2,Array.from(nodata+'\0',c=>c.charCodeAt(0))]
     ];
     const sizes={2:1,3:2,4:4,12:8};let cursor=8+2+12*entries.length+4;
     for(const e of entries)if(e[2].length*sizes[e[1]]>4){e[3]=cursor;cursor+=e[2].length*sizes[e[1]];cursor=(cursor+7)&~7;}
@@ -1022,11 +1022,15 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         if(Object.values(bounds).some(v=>!Number.isFinite(v))||bounds.west< -180||bounds.east>180||bounds.east-bounds.west>10)throw Error('Unsupported geographic DEM bounds.');
         const hash=await crypto.subtle.digest('SHA-256',data.buffer),sourceSHA256=Array.from(new Uint8Array(hash),v=>v.toString(16).padStart(2,'0')).join('');
         template={...t,mask};delete template.image;
-        self.postMessage({type:'prepared',grid:{dimensions:{width:t.width,height:t.height},crsCode:'EPSG:'+t.epsg,affineTransform:{scaleX:t.dx,shearX:0,translateX:t.origin[0],shearY:0,scaleY:-t.dy,translateY:t.origin[1]}},bounds,validCells,sourceSHA256});return;
+        const dem = data.normalizeTraining
+          ? writeFloatTIFF(Float32Array.from(raw, (value, i) => mask[i] ? value : NaN),
+              t.width,t.height,t.dx,t.dy,t.origin,t.epsg,'nan') : null;
+        self.postMessage({type:'prepared',dem,grid:{dimensions:{width:t.width,height:t.height},crsCode:'EPSG:'+t.epsg,affineTransform:{scaleX:t.dx,shearX:0,translateX:t.origin[0],shearY:0,scaleY:-t.dy,translateY:t.origin[1]}},bounds,validCells,sourceSHA256}, dem ? [dem] : []);return;
       }
       if(data.action==='auditStack'){
         if(!template||!auditRasterStack)throw Error('Prepare a DEM before checking the raster stack.');
-        const readAlignedRaster = async raster => {
+        const normalized = [];
+        const readAlignedRaster = async (raster, name) => {
           const buffer = raster instanceof Blob ? await raster.arrayBuffer() : raster;
           const t = await readGrid(buffer);
           const s = template;
@@ -1037,10 +1041,16 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           }
           if (t.image.getSamplesPerPixel() !== 1) throw Error('A single-band GeoTIFF is required.');
           const values = await t.image.readRasters({ samples: [0], interleave: true });
-          const nodata = t.image.getGDALNoData();
-          return { values, nodata: nodata === null ? null : Number(nodata) };
+          const tag = t.image.getGDALNoData();
+          const nodata = tag === null ? null : Number(tag);
+          const clean = Float32Array.from(values, value => Number.isFinite(value) && value !== nodata ? value : NaN);
+          const encoded = writeFloatTIFF(clean,s.width,s.height,s.dx,s.dy,s.origin,s.epsg,'nan');
+          normalized.push({ name, raster: encoded });
+          return { values: clean, nodata: null };
         };
-        self.postMessage(await auditRasterStack(data, template, readAlignedRaster));
+        const result = await auditRasterStack(data, template, readAlignedRaster);
+        const trainingEntries = result.passed ? normalized : [];
+        self.postMessage({ result, trainingEntries }, trainingEntries.map(entry => entry.raster));
         return;
       }
       if(data.action==='product'){

@@ -26,7 +26,10 @@ def read_grid_layer(path, expected=None):
             grid[:2] != expected[:2] or not np.allclose(grid[2], expected[2], atol=1e-6, rtol=0)
         ):
             raise ValueError(f"{Path(path).stem} does not match the DEM grid.")
-        values = raster.read(1, masked=True).astype("float32").filled(np.nan)
+        try:
+            values = raster.read(1, masked=True).astype("float32").filled(np.nan)
+        except rasterio.errors.RasterioIOError as error:
+            raise ValueError(f"Training could not read {Path(path).stem}. Run Check raster stack again.") from error
     return values, grid
 
 

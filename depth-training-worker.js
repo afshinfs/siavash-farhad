@@ -12,7 +12,7 @@ self.onmessage = async ({ data }) => {
   try {
     progress('Loading Python and XGBoost. The first run downloads the browser runtime.');
     const [{ loadPyodide }, helpers, program] = await Promise.all([
-      import(indexURL + 'pyodide.mjs'), readSource('./ml.py'), readSource('./train-depth.py?v=2'),
+      import(indexURL + 'pyodide.mjs'), readSource('./ml.py'), readSource('./train-depth.py?v=3'),
     ]);
     const py = await loadPyodide({ indexURL });
     await py.loadPackage(['numpy', 'scipy', 'scikit-learn', 'xgboost', 'rasterio']);
@@ -48,6 +48,7 @@ json.dumps(train_depth_models("/training", config["predictors"], config["targets
     }
     self.postMessage({ type: 'complete', report: { ...report, runtime: version }, exports }, transfer);
   } catch (error) {
-    self.postMessage({ type: 'error', message: String(error.message || error).slice(-1300) });
+    const detail = String(error.message || error).trim().split('\n').at(-1);
+    self.postMessage({ type: 'error', message: detail.slice(0, 500) });
   }
 };

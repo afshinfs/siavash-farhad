@@ -28,7 +28,7 @@ export async function auditRasterStack({ predictorNames, targets, entries, block
     layerResults.push(row);
     if (!entry.raster) continue;
     try {
-      const { values, nodata } = await readAlignedRaster(entry.raster);
+      const { values, nodata } = await readAlignedRaster(entry.raster, entry.name);
       const isTarget = Object.hasOwn(targets, entry.name);
       const mask = Uint8Array.from(values, (value, i) => (
         template.mask[i] && Number.isFinite(value) && value !== nodata && (!isTarget || value >= 0)
@@ -194,8 +194,8 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       try { job.worker = new Worker(url); }
       finally { URL.revokeObjectURL(url); }
-      const prepared = await callWorker(job, { action: 'prepare', buffer }, 'Raster-stack');
-      const result = await callWorker(job, {
+      const prepared = await callWorker(job, { action: 'prepare', buffer, normalizeTraining: true }, 'Raster-stack');
+      const { result, trainingEntries } = await callWorker(job, {
         action: 'auditStack', entries, predictorNames: Object.keys(predictors), targets: depths, blockSize, wetThreshold,
       }, 'Raster-stack');
       if (current !== job) return;
@@ -204,7 +204,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
         demSource: localDEM?.name ?? 'Current WebGIS DEM', demSHA256: prepared.sourceSHA256, grid: prepared.grid,
         demCells: prepared.validCells, blockSizeCells: blockSize, wetThresholdM: 0.05, ...result,
       };
-      checkedInputs = { source, entries };
+      if (report.passed) checkedInputs = { dem: prepared.dem, entries: trainingEntries };
       showReport();
     } catch (error) {
       if (current === job) message(error.message, true);
@@ -241,16 +241,14 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
   async function train() {
     if (field('train').disabled || !checkedInputs) return;
     clearTraining();
-    const { source, entries } = checkedInputs;
+    const { dem, entries } = checkedInputs;
     const foldCount = Number(field('folds').value);
     const job = { controller: new AbortController(), worker: null, training: true };
     current = job;
     refresh();
     trainingMessage('Preparing the checked raster inputs…');
     try {
-      const dem = await source.arrayBuffer();
-      if (current !== job) return;
-      const worker = new Worker(new URL('./depth-training-worker.js?v=2', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('./depth-training-worker.js?v=3', import.meta.url), { type: 'module' });
       job.worker = worker;
       function finish(error, result) {
         if (current !== job) return;
@@ -268,10 +266,10 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       };
       worker.onerror = () => finish('The training worker could not load. Check your connection and try again.');
       worker.postMessage({
-        dem, entries: entries.map(({name, raster}) => ({name, raster})),
+        dem, entries,
         config: { blockSize, foldCount, predictors: Object.keys(predictors),
           targets: Object.entries(depths).map(([name, period]) => ({name, period})) },
-      }, [dem]);
+      });
     } catch (error) {
       if (current !== job) return;
       job.worker?.terminate();
