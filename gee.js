@@ -84,11 +84,78 @@ function clearResult() {
 }
 function clearAccess() {pendingAuth=false;token=null;expiresAt=0;connectedClient=null;session++;refresh();}
 function stopRequest() {requestController?.abort();requestController=null;inspector?.terminate();inspector=null;if(inspectionReject){const reject=inspectionReject;inspectionReject=null;reject(new DOMException('Cancelled','AbortError'));}busy=false;refresh();}
-function disconnect() {stopRequest();clearAccess();clearResult();el('ee-state').textContent='Disconnected';message('Local connection cleared. Google permissions can be managed in your Google account.');}
+const EE_SETUP_STORAGE_KEY = 'siavash-farhad:earth-engine-setup:v1';
+function setupValues() {
+  return { project: el('ee-project').value.trim(), clientId: el('ee-client').value.trim() };
+}
+function rememberStatus(text) {
+  el('ee-remember-status').textContent = text;
+}
+function saveSetup(setup) {
+  try {
+    if (setup) localStorage.setItem(EE_SETUP_STORAGE_KEY, JSON.stringify(setup));
+    else localStorage.removeItem(EE_SETUP_STORAGE_KEY);
+    return true;
+  } catch {
+    rememberStatus(setup ? 'Browser storage is unavailable. The IDs could not be saved.'
+      : 'Browser storage is unavailable. If the IDs reappear, clear this site’s browser data.');
+    return false;
+  }
+}
+function syncRememberedSetup() {
+  let setup = null;
+  if (el('ee-remember').checked) {
+    const ids = setupValues();
+    try {
+      validateProject(ids.project);
+      validateClientId(ids.clientId);
+      setup = ids;
+    } catch {
+      // Save a complete, valid pair only.
+    }
+  }
+  if (saveSetup(setup)) {
+    rememberStatus(setup ? 'Setup saved on this browser.' : el('ee-remember').checked
+      ? 'Enter both IDs to save your setup.' : '');
+  }
+}
+function restoreSetup() {
+  try {
+    const raw = localStorage.getItem(EE_SETUP_STORAGE_KEY);
+    if (!raw) return;
+    const { project, clientId } = JSON.parse(raw);
+    if (typeof project !== 'string' || typeof clientId !== 'string') return;
+    validateProject(project);
+    validateClientId(clientId);
+    el('ee-project').value = project;
+    el('ee-client').value = clientId;
+    el('ee-remember').checked = true;
+    rememberStatus('Setup loaded from this browser.');
+  } catch {
+    // Corrupt or unavailable browser storage does not prevent Google sign-in.
+  }
+}
+function disconnectSession() {
+  stopRequest();
+  clearAccess();
+  clearResult();
+  el('ee-state').textContent = 'Disconnected';
+}
+function disconnectAndForget() {
+  el('ee-project').value = '';
+  el('ee-client').value = '';
+  el('ee-remember').checked = false;
+  const removed = saveSetup(null);
+  if (removed) rememberStatus('');
+  disconnectSession();
+  message(removed ? 'Earth Engine disconnected and setup cleared from this browser.'
+    : 'Earth Engine disconnected and both fields cleared. The saved setup could not be removed.', !removed);
+}
 function refresh() {
   const connected=Boolean(token)&&Date.now()<expiresAt;
   queueMicrotask(() => { refreshSatellite(); exposurePanel.refresh(); floodDepthPanel.refresh(); });
-  el('ee-connect').disabled=busy||pendingAuth;el('ee-disconnect').disabled=!token&&!busy&&!pendingAuth;
+  el('ee-connect').disabled=busy||pendingAuth;el('ee-disconnect').disabled=!token&&!busy&&!pendingAuth&&!el('ee-remember').checked&&
+    !el('ee-project').value&&!el('ee-client').value;
   el('ee-fetch').disabled=!connected||!grid||busy||drawing;el('ee-cancel').disabled=!busy;
   for(const id of ['ee-client','ee-project','west','south','east','north','ee-apply','ee-preset','ee-draw']) el(id).disabled=busy;
 }
@@ -221,8 +288,20 @@ el('ee-connect').addEventListener('click',()=>{
     client.requestAccessToken({prompt:'select_account'});
   }catch(error){clearAccess();el('ee-state').textContent='Setup required';message(safeError(error.message),true);}
 });
-el('ee-disconnect').addEventListener('click',disconnect);
-for(const id of ['ee-client','ee-project'])el(id).addEventListener('input',()=>{if(token||pendingAuth){disconnect();message('Connection settings changed. Connect again.');}});
+restoreSetup();
+el('ee-disconnect').addEventListener('click',disconnectAndForget);
+el('ee-remember').addEventListener('change',()=>{
+  syncRememberedSetup();
+  refresh();
+});
+for(const id of ['ee-client','ee-project'])el(id).addEventListener('input',()=>{
+  if(token||pendingAuth){
+    disconnectSession();
+    message('Connection settings changed. Connect again.');
+  }
+  if(el('ee-remember').checked)syncRememberedSetup();
+  refresh();
+});
 el('ee-cancel').addEventListener('click',()=>{session++;stopRequest();clearResult();el('ee-state').textContent='Request stopped';message('Local request stopped. Earth Engine may finish the computation remotely.');});
 el('ee-fetch').addEventListener('click',retrieveDem);
 for(const id of ['west','south','east','north'])el(id).addEventListener('input',()=>{grid=null;clearResult();refresh();message('Apply the edited coordinates to select the study area.');});
