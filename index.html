@@ -24,8 +24,17 @@
 <body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE</span></header>
 <main><h1 class="workspace-title">SIAVASH &amp; FARHAD WebGIS</h1><div class="workflow-layout">
 
-<nav class="workflow-tabs" aria-label="WebGIS workflow"><a href="#ee-title"><span>1</span>Study area &amp; elevation</a><a href="#terrain-title"><span>2</span>Terrain &amp; hydrology</a><a href="#linear-title"><span>3</span>Predictors &amp; exposure</a><a href="#flood-title"><span>4</span>GloFAS reference depths</a><a href="#ml-stack-title"><span>5</span>Flood-depth models</a><a href="#weakline-panel"><span>6</span>Weakline scenarios</a><a href="#hazard-panel"><span>7</span>Flood hazard maps</a><a href="#engine-panel"><span>8</span>Browser checks</a></nav>
+<nav class="workflow-tabs" aria-label="WebGIS workflow"><a href="#engine-panel"><span>0</span>Browser checks</a><a href="#ee-title"><span>1</span>Study area &amp; elevation</a><a href="#terrain-title"><span>2</span>Terrain &amp; hydrology</a><a href="#linear-title"><span>3</span>Predictors &amp; exposure</a><a href="#flood-title"><span>4</span>GloFAS reference depths</a><a href="#ml-stack-title"><span>5</span>Flood-depth models</a><a href="#weakline-panel"><span>6</span>Weakline scenarios</a><a href="#hazard-panel"><span>7</span>Flood hazard maps</a></nav>
 <div class="workflow-content">
+<section class="panel engine-panel" id="engine-panel" aria-labelledby="run-title"><div class="panel-heading"><div><p class="eyebrow">STEP 00</p>
+  <h2 id="run-title">Browser checks</h2><p>Python + WebAssembly · separate background worker</p></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
+<p class="notice">Run this check first to verify that your browser can process a small synthetic dataset. The first run downloads the Python runtime and scientific packages from jsDelivr and may take several minutes. No sign-in or data upload is required.</p>
+<div class="actions"><button id="run">Run browser checks <span aria-hidden="true">↗</span></button><button id="cancel" class="secondary" disabled>Cancel</button><button id="download" class="secondary" disabled>Download report</button><a id="raster" hidden download="synthetic-depth.tif">Download test GeoTIFF</a></div>
+<ol id="checks" aria-label="Compatibility checks"></ol>
+<div class="stats"><div><span id="elapsed">0.0 s</span><small>Elapsed time</small></div><div><span id="heartbeat">0</span><small>Interface heartbeats</small></div><div><span id="grid">64 × 64</span><small>Synthetic raster / 30 m cells</small></div></div>
+<details><summary>Live processing log</summary><pre id="log" aria-label="Processing log"></pre></details><details id="report-details"><summary>Report details</summary><pre id="report" aria-label="Test report">Run the checks to generate a report.</pre></details><p class="ee-help">After the checks pass, continue to <a href="#ee-title">Step 01 · Study area and elevation</a>.</p></section>
+
+
 
 <section class="panel ee-panel" aria-labelledby="ee-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 01</p>
@@ -398,18 +407,10 @@
   </div>
 </section>
 
-<section class="panel engine-panel" id="engine-panel" aria-labelledby="run-title"><div class="panel-heading"><div><p class="eyebrow">STEP 08</p>
-  <h2 id="run-title">Browser checks</h2><p>Python + WebAssembly · separate background worker</p></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
-<p class="notice">This test uses a small <strong>synthetic dataset</strong>. It checks software compatibility, not flood prediction accuracy. The first run downloads the Python runtime and scientific packages from jsDelivr and may take several minutes. No sign-in or data upload is required.</p>
-<div class="actions"><button id="run">Run browser checks <span aria-hidden="true">↗</span></button><button id="cancel" class="secondary" disabled>Cancel</button><button id="download" class="secondary" disabled>Download report</button><a id="raster" hidden download="synthetic-depth.tif">Download test GeoTIFF</a></div>
-<ol id="checks" aria-label="Compatibility checks"></ol>
-<div class="stats"><div><span id="elapsed">0.0 s</span><small>Elapsed time</small></div><div><span id="heartbeat">0</span><small>Interface heartbeats</small></div><div><span id="grid">64 × 64</span><small>Synthetic raster / 30 m cells</small></div></div>
-<details><summary>Live processing log</summary><pre id="log" aria-label="Processing log"></pre></details><details id="report-details"><summary>Report details</summary><pre id="report" aria-label="Test report">Run the checks to generate a report.</pre></details></section>
-<section class="scope"><div><p class="eyebrow">WHAT THIS PROVES</p><h2>A working engine is the first step.</h2></div><div><p>A passing report confirms the tested operations work on this browser and device. The report records package versions, timings, numerical checks and limitations.</p><p>Elevation, terrain attributes, depression filling, D8 routing, flow accumulation and TWI are available above. Road and river predictors are also available. Satellite and environmental retrieval is available above. Exposure layers are available above. JRC GloFAS reference depths can be retrieved and aligned to the DEM grid. SIAVASH hazard maps are available above. FARHAD risk mapping is a later stage.</p></div></section>
 </div></div></main><script type="module">
 const groups = [
-  ['ee-title'], ['terrain-title','hydro-title'], ['linear-title','sat-title','exp-title'],
-  ['flood-title'], ['ml-stack-title'], ['weakline-title'], ['hazard-title'], ['run-title'],
+  ['run-title'], ['ee-title'], ['terrain-title','hydro-title'], ['linear-title','sat-title','exp-title'],
+  ['flood-title'], ['ml-stack-title'], ['weakline-title'], ['hazard-title'],
 ].map(ids => ids.map(id => document.getElementById(id).closest('section')));
 const tabs = [...document.querySelectorAll('.workflow-tabs a')];
 function showWorkflow() {
@@ -421,7 +422,6 @@ function showWorkflow() {
     if (i === selected) tabs[i].setAttribute('aria-current', 'page');
     else tabs[i].removeAttribute('aria-current');
   });
-  document.querySelector('.workflow-content > .scope').hidden = selected !== tabs.length - 1;
   requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));
 }
 window.addEventListener('hashchange', showWorkflow);
