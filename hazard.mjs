@@ -1,5 +1,5 @@
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
-export function computeHazards({ width, height, periods, depths, slope, manning, closure, clean }) {
+export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, mode = 'baseline', basis = 'auto', clean }) {
   const size = width * height;
   const wetDepth = Math.fround(0.05);
   const adrLimits = [[0.3, 2, 0.3], [0.5, 2, 0.6], [1.2, 2, 0.6], [2, 2, 1], [4, 4, 4]]
@@ -107,11 +107,14 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   const base = [], composite = [], coverage = {};
   for (const period of periods) {
     const baseline = classify(depths[period]);
-    const modified = closure?.period === period ? classify(closure.depth) : null;
+    const modified = scenarioDepths[period] ? classify(scenarioDepths[period]) : null;
     const baselineADR = cleanClasses(baseline.adr);
-    const adr = modified ? overlay(baselineADR, cleanClasses(overlay(baseline.adr, modified.adr))) : baselineADR;
-    const intensityD = overlay(baseline.intensityD, modified?.intensityD);
-    const intensityDV = overlay(baseline.intensityDV, modified?.intensityDV);
+    const weaklines = mode === 'weaklines' && modified;
+    const worst = mode === 'worst' && modified;
+    const adr = weaklines ? overlay(baselineADR, cleanClasses(modified.adr))
+      : worst ? cleanClasses(modified.adr) : baselineADR;
+    const intensityD = modified?.intensityD ?? baseline.intensityD;
+    const intensityDV = modified?.intensityDV ?? baseline.intensityDV;
     base.push({ adr: baselineADR, intensityD: baseline.intensityD, intensityDV: baseline.intensityDV });
     composite.push({ adr, intensityD, intensityDV });
     rasters['adr7_' + period] = adr;
@@ -134,22 +137,27 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   for (const [name, field] of [['foen_depth_danger', 'intensityD'], ['foen_dv_danger', 'intensityDV']]) {
     // FOEN residual is ordered by severity below Low, even though its map code is 4.
     const danger = foenDanger(composite.map(item => item[field]));
-    const baseline = closure ? foenDanger(base.map(item => item[field])) : danger;
+    const baseline = mode === 'weaklines' ? foenDanger(base.map(item => item[field])) : danger;
     const severity = [0, 2, 3, 4, 1];
     rasters[name] = danger.map((code, i) => severity[baseline[i]] > severity[code] ? baseline[i] : code);
   }
   const envelope = items => cleanClasses(items[0].adr.map((_, i) =>
     Math.max(...items.map(item => item.adr[i]))));
-  rasters.adr7_envelope = overlay(envelope(base), closure ? envelope(composite) : null);
+  rasters.adr7_envelope = mode === 'weaklines' ? overlay(envelope(base), envelope(composite)) : envelope(composite);
   const first = firstExceedance(composite.map(item => item.adr));
   rasters.adr7_first_period = first.periodAtCell;
   rasters.adr7_first_class = first.firstClass;
-  return { rasters, coverage };
+  const significant = values => values.reduce((count, code) => count + Number(code === 3), 0);
+  const depthCount = significant(rasters.foen_depth_danger), dvCount = significant(rasters.foen_dv_danger);
+  const chosen = basis === 'auto' ? (dvCount > depthCount ? 'dv' : 'depth') : basis;
+  rasters.foen_champion = chosen === 'dv' ? rasters.foen_dv_danger : rasters.foen_depth_danger;
+  return { rasters, coverage, champion: { basis: chosen, selection: basis, depthCount, dvCount } };
 }
 
 const periods = [30, 100, 300, 1000];
 
 function productDescription(name) {
+  if (name === 'foen_champion') return ['FOEN champion danger', 'danger'];
   if (name === 'foen_depth_danger') return ['FOEN danger · depth', 'danger'];
   if (name === 'foen_dv_danger') return ['FOEN danger · depth × velocity', 'danger'];
   if (name === 'adr7_envelope') return ['ADR7 maximum class across all periods', 'adr'];
@@ -166,7 +174,7 @@ function productDescription(name) {
   return [label + ' · ' + Number(match[2]).toLocaleString() + ' years', type];
 }
 
-export function createHazardPanel({ element, readInputs, readClosure, rasterWorker, callWorker }) {
+export function createHazardPanel({ element, readInputs, readScenarios, rasterWorker, callWorker }) {
   const field = name => element('hazard-' + name);
   let active = null, result = null, url = null;
   const legends = {
@@ -179,7 +187,7 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
   function read() {
     const inputs = readInputs();
     const predicted = field('source').value === 'trained';
-    const closure = readClosure();
+    const closure = readScenarios();
     const available = closure?.predicted === predicted ? closure : null;
     return { ...inputs, predicted, available, depths: predicted ? inputs.trainedDepths : inputs.referenceDepths };
   }
@@ -190,11 +198,16 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
       : !periods.every(period => depths?.[period]) ? 'Provide all four depth rasters for this source.'
       : '';
     field('ready').textContent = need;
-    field('closure-note').textContent = available
-      ? 'Stage 12 closure available for ' + available.period.toLocaleString() + ' years.'
-      : 'Run a Stage 12 closure comparison using the same depth source to enable this option.';
-    if (!available) field('closure').checked = false;
-    field('closure').disabled = !available || Boolean(active);
+    const hasScenarios = Boolean(available && Object.keys(available.worst).length);
+    field('closure-note').textContent = hasScenarios
+      ? 'Completed weakline scenarios are available for this depth source.'
+      : 'Run the Stage 12 scenario search with this depth source to enable Weaklines and Worst-case.';
+    for (const option of field('mode').options) {
+      option.disabled = option.value !== 'baseline' && !hasScenarios;
+    }
+    if (!hasScenarios) field('mode').value = 'baseline';
+    field('mode').disabled = Boolean(active);
+    field('basis').disabled = Boolean(active);
     field('source').disabled = Boolean(active);
     field('clean').disabled = Boolean(active);
     field('run').disabled = Boolean(active) || Boolean(need);
@@ -220,13 +233,10 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
     status('');
     queueMicrotask(refresh);
   }
-  function showLayer() {
-    if (!result) return;
-    const name = field('layer').value;
+  function drawLayer(name, canvas, legendNode) {
     const [label, type] = productDescription(name);
     const product = result.products[name];
     const { width, height } = result.report.grid.dimensions;
-    const canvas = field('canvas');
     canvas.width = width;
     canvas.height = height;
     canvas.setAttribute('aria-label', label);
@@ -244,7 +254,6 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
     }
     canvas.getContext('2d').putImageData(pixels, 0, 0);
     const unit = type === 'velocity' ? 'm/s' : 'm²/s';
-    const legendNode = field('legend');
     legendNode.replaceChildren();
     if (legend) {
       for (const [code, text, hex] of legend) {
@@ -259,7 +268,15 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
     } else {
       legendNode.append('Colour scale 0–' + max.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit);
     }
-    legendNode.append('Transparent = NoData');
+    const noData = document.createElement('span');
+    noData.textContent = 'Transparent = NoData';
+    legendNode.append(noData);
+  }
+  function showLayer() {
+    if (!result) return;
+    const name = field('layer').value;
+    const product = result.products[name];
+    drawLayer(name, field('canvas'), field('legend'));
     field('coverage').textContent = product.summary.validCells.toLocaleString() + ' classified or calculated cells.';
     clearDownload();
     url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
@@ -269,7 +286,9 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
   field('run').addEventListener('click', async () => {
     if (field('run').disabled) return;
     const { dem, slope, manning, depths, predicted, available } = read();
-    const includeClosure = field('closure').checked && available;
+    const mode = field('mode').value;
+    const basis = field('basis').value;
+    const scenarios = mode === 'baseline' ? null : available;
     const clean = field('clean').checked;
     invalidate();
     const job = { controller: new AbortController(), worker: null };
@@ -284,17 +303,18 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
       const buffer = dem instanceof Blob ? await dem.arrayBuffer() : dem.slice(0);
       if (active !== job) return;
       const prepared = await callWorker(job, { action: 'prepare', buffer }, 'Hazard');
-      if (includeClosure && includeClosure.demSHA256 !== prepared.sourceSHA256) throw Error('Run the closure comparison again using this DEM.');
-      const { products, coverage } = await callWorker(job, {
+      if (scenarios && scenarios.demSHA256 !== prepared.sourceSHA256) throw Error('Run the closure comparison again using this DEM.');
+      const { products, coverage, champion } = await callWorker(job, {
         action: 'hazard', slope, manning, depths, periods, clean,
-        closure: includeClosure ? { period: includeClosure.period, depth: includeClosure.depth } : null,
+        mode, basis, scenarios: scenarios?.[mode === 'worst' ? 'worst' : 'envelope'],
       }, 'Hazard');
       if (active !== job) return;
-      const mode = includeClosure ? 'baseline_plus_closure' : 'baseline';
       result = { products, report: {
         schemaVersion: 1, stage: 'SIAVASH flood hazard', mode, periods, grid: prepared.grid, demSHA256: prepared.sourceSHA256,
         depthSource: predicted ? 'XGBoost predictions' : 'GloFAS reference depths',
-        closure: includeClosure ? { period: includeClosure.period, candidateIds: includeClosure.candidateIds } : null,
+        champion,
+        scenarios: scenarios?.report.periods.map(({ period, winner, tested }) => ({ period, winner, tested })) ?? null,
+        rankingMetric: scenarios?.report.metric ?? null,
         wetDepthM: 0.05, velocity: { formula: 'max(h, 0.10)^(2/3) * sqrt(S) / n',
           slope: 'tan(slopeDegrees × pi / 180)', gradientRange: [0.00001, 0.01], roughnessRange: [0.01, 0.20], maxMps: 20 },
         clean: clean ? 'Remove four-connected groups under six cells, then apply a 3 × 3 majority update to positive classes.' : null,
@@ -306,6 +326,10 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
       field('layer').replaceChildren(...names.map(name => new Option(productDescription(name)[0], name)));
       field('layer').value = 'adr7_envelope';
       field('results').hidden = false;
+      drawLayer('foen_champion', field('foen-map'), field('foen-legend'));
+      drawLayer('adr7_envelope', field('adr-map'), field('adr-legend'));
+      field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
+        ' · Significant cells: ' + champion.depthCount.toLocaleString() + ' by depth, ' + champion.dvCount.toLocaleString() + ' by depth × velocity.';
       showLayer();
       const missingVelocity = Object.values(coverage).some(row => row.wetCells > row.wetCellsWithVelocity);
       status('Hazard layers ready.' + (missingVelocity ? ' Some wet cells lack valid slope or roughness. Check the layer coverage in the report.' : ''));
@@ -319,7 +343,7 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
       }
     }
   });
-  for (const name of ['source', 'closure', 'clean']) field(name).addEventListener('change', invalidate);
+  for (const name of ['source', 'mode', 'basis', 'clean']) field(name).addEventListener('change', invalidate);
   field('cancel').addEventListener('click', () => { invalidate(); status('Hazard processing cancelled.'); });
   field('layer').addEventListener('change', showLayer);
   field('report').addEventListener('click', () => {
@@ -330,5 +354,5 @@ export function createHazardPanel({ element, readInputs, readClosure, rasterWork
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   });
-  return { invalidate, refresh, closureChanged: () => field('closure').checked ? invalidate() : queueMicrotask(refresh) };
+  return { invalidate, refresh, closureChanged: () => field('mode').value !== 'baseline' ? invalidate() : queueMicrotask(refresh) };
 }

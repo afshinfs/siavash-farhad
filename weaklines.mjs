@@ -59,7 +59,7 @@ export function screenWeaklines({ width, height, dx, corridor, depthByPeriod, th
 
 // A paired priority flood on water-surface elevation. The same domain, river
 // outlets and depth cap are used in both runs, with a raised wall in the closure.
-export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth, riverDistance, barrierCells, cap }) {
+export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth, riverDistance, barrierCells, cap, scenarioOnly = false }) {
   const n = width * height;
   const valid = Uint8Array.from(terrain, (z, i) => Number.isFinite(z) &&
     Number.isFinite(inputDepth[i]) && inputDepth[i] >= 0);
@@ -129,7 +129,9 @@ export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth,
     return Float32Array.from(surface, (value, i) =>
       valid[i] && !barrier[i] ? Math.min(cap, Math.max(0, value - terrain[i])) : NaN);
   }
-  const baseline = route(false), closure = route(true);
+  const closure = route(true);
+  if (scenarioOnly) return closure;
+  const baseline = route(false);
   const difference = new Float32Array(n).fill(NaN);
   let comparedCells = 0, baselineWet = 0, closureWet = 0, deeper = 0, shallower = 0;
   let excludedBarrierCells = 0, baselineVolume = 0, closureVolume = 0;
@@ -155,11 +157,81 @@ export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth,
   } };
 }
 
+// The empty subset is the original open baseline. Every other subset closes
+// exactly the listed lines and leaves the remaining lines open.
+export function runWeaklineScenarios({ candidates, inputDepth, terrain, riverDistance, population, width, height, dx, exhaustive, progress }, route) {
+  const eligible = candidates.filter(line => line.cells.some(i => Number.isFinite(terrain[i]) && inputDepth[i] > 0));
+  const maskKeys = new Set();
+  const scenarios = [];
+  const envelope = inputDepth.slice();
+  let winner = null, worst = null, duplicateMasks = 0, skipped = 0;
+  const validCells = terrain.reduce((count, z, i) => count + Number(Number.isFinite(z) && Number.isFinite(inputDepth[i])), 0);
+  let lastProgress = Date.now();
+  const cap = inputDepth.reduce((max, depth) => Number.isFinite(depth) ? Math.max(max, depth) : max, 0) + 2;
+  const totalPossible = (2n ** BigInt(eligible.length) - 1n).toString();
+  function score(depth) {
+    let total = 0;
+    for (let i = 0; i < depth.length; i++) {
+      if (Number.isFinite(depth[i])) total += depth[i] * (population ? (Number.isFinite(population[i]) ? population[i] : 0) : dx * dx);
+    }
+    return total;
+  }
+  function evaluate(lines) {
+    if (Date.now() - lastProgress >= 1000) {
+      progress(scenarios.length, totalPossible);
+      lastProgress = Date.now();
+    }
+    const cells = [...new Set(lines.flatMap(line => line.cells)
+      .filter(i => Number.isFinite(terrain[i]) && Number.isFinite(inputDepth[i])))].sort((a, b) => a - b);
+    const key = cells.join(',');
+    if (maskKeys.has(key)) { duplicateMasks++; return; }
+    maskKeys.add(key);
+    if (cells.length >= validCells) {
+      skipped++;
+      return;
+    }
+    const routed = route({ width, height, terrain, inputDepth, riverDistance, barrierCells: cells, cap, scenarioOnly: true });
+    // Retain open depths where closure routing does not report a value,
+    // including the artificial barrier footprint. Score each on the same grid.
+    const depth = routed.map((value, i) => Number.isFinite(value) ? value : inputDepth[i]);
+    for (let i = 0; i < depth.length; i++) if (depth[i] > envelope[i]) envelope[i] = depth[i];
+    const row = { closed: lines.map(line => line.id), score: score(depth) };
+    scenarios.push(row);
+    if (!winner || row.score > winner.score) { winner = row; worst = depth; }
+
+  }
+  function* subsets(start, remaining, prefix = []) {
+    if (!remaining) { yield prefix; return; }
+    for (let i = start; i <= eligible.length - remaining; i++) {
+      yield* subsets(i + 1, remaining - 1, [...prefix, eligible[i]]);
+    }
+  }
+  if (exhaustive) {
+    for (let length = 1; length <= eligible.length; length++) {
+      for (const lines of subsets(0, length)) evaluate(lines);
+    }
+  } else {
+    for (const line of eligible) evaluate([line]);
+    for (let length = 2; length <= eligible.length; length++) evaluate(eligible.slice(0, length));
+    let mixed = 0;
+    for (const length of [2, 3]) {
+      for (const lines of subsets(0, length)) {
+        if (mixed >= 200) break;
+        const before = scenarios.length;
+        evaluate(lines);
+        if (scenarios.length > before) mixed++;
+      }
+    }
+  }
+  return { envelope, worst, report: { totalPossible, eligible: eligible.map(line => line.id), tested: scenarios.length,
+    duplicateMasks, skipped, baselineScore: score(inputDepth), winner, scenarios } };
+}
+
 export function createWeaklinePanel({ element, readInputs, rasterWorker, callWorker, onClosureChange }) {
   const field = name => element('weakline-' + name);
   const periods = [30, 100, 300, 1000];
   const colors = { 30: '#a52935', 100: '#a65c00', 300: '#166879', 1000: '#61439a' };
-  let active = null, result = null, comparison = null, closureOutput = null, map = null, overlay = null;
+  let active = null, result = null, comparison = null, batchOutput = null, map = null, overlay = null;
   const selected = new Set();
   const urls = [];
 
@@ -179,7 +251,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   function refresh() {
     const { dem, method, reference, depths, terrain } = sourceInputs();
     const waiting = !dem ? 'Provide a DEM above.'
-      : !reference ? method === 'depth25' ? 'Enable the Gumbel fit under Retrieve reference flood depths, or choose an aligned 25-year GeoTIFF here.'
+      : !reference ? method === 'depth25' ? 'Enable the Gumbel fit under GloFAS reference depths, or choose an aligned 25-year GeoTIFF here.'
         : 'Calculate river distance above or open an aligned river_distance GeoTIFF in the raster stack.'
       : !periods.every(period => depths?.[period]) ? 'Provide all four depth rasters for the selected source.'
       : '';
@@ -196,6 +268,12 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     }
     field('run').disabled = Boolean(active) || Boolean(waiting);
     field('cancel').disabled = !active;
+    field('batch').disabled = Boolean(active) || !terrain || !result?.features.length;
+    field('search').disabled = Boolean(active);
+    field('search-size').textContent = result?.features.length ? 'Possible closures before wet-cell filtering · ' +
+      periods.map(year => year.toLocaleString() + ' years: ' +
+        (2n ** BigInt(result.candidates.filter(candidate => candidate.period === year).length) - 1n).toLocaleString())
+        .join(' · ') + '. Exhaustive search can take substantial time for large groups.' : '';
     field('toggle').disabled = Boolean(active) || !result?.features.length;
     field('closure').disabled = Boolean(active) || !selected.size || !terrain || tooEarly;
     field('selection').textContent = selected.size
@@ -211,10 +289,6 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   }
   function clearComparison() {
     comparison = null;
-    if (closureOutput) {
-      closureOutput = null;
-      onClosureChange?.();
-    }
     urls.splice(0).forEach(url => URL.revokeObjectURL(url));
     field('exports').replaceChildren();
     field('comparison').hidden = true;
@@ -224,6 +298,9 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     active?.worker?.terminate();
     active = null;
     result = null;
+    batchOutput = null;
+    field('batch-results').hidden = true;
+    onClosureChange?.();
     selected.clear();
     clearComparison();
     overlay?.remove();
@@ -246,14 +323,14 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     refresh();
     try {
       const code = '(' + rasterWorker.toString() + ')(null, {}, {}, {}, null, ' +
-        screenWeaklines.toString() + ', ' + compareWeaklineClosure.toString() + ');';
+        screenWeaklines.toString() + ', ' + compareWeaklineClosure.toString() + ', null, ' + runWeaklineScenarios.toString() + ');';
       const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));
       try { job.worker = new Worker(url); }
       finally { URL.revokeObjectURL(url); }
       const buffer = dem instanceof Blob ? await dem.arrayBuffer() : dem.slice(0);
       if (active !== job) return null;
       const prepared = await callWorker(job, { action: 'prepare', buffer }, 'Weakline');
-      const output = await callWorker(job, { action, ...data }, 'Weakline');
+      const output = await callWorker(job, { action, ...data }, 'Weakline', progress => status(progress));
       return active === job ? { ...output, prepared } : null;
     } catch (error) {
       if (active === job) status(error.message, true);
@@ -350,7 +427,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   field('closure').addEventListener('click', async () => {
     if (field('closure').disabled) return;
     clearComparison();
-    const { dem, terrain, depths, riverDistance, predicted } = sourceInputs();
+    const { dem, terrain, depths, riverDistance } = sourceInputs();
     const period = Number(field('period').value);
     const ids = [...selected].sort((a, b) => a - b);
     const candidates = result.candidates.filter(candidate => selected.has(candidate.id));
@@ -394,10 +471,37 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       urls.push(link.href);
       field('exports').append(link);
     }
-    closureOutput = { period, candidateIds: ids, predicted, depth: rasters.closure, demSHA256: output.prepared.sourceSHA256 };
-    onClosureChange?.();
     field('comparison').hidden = false;
     status(period.toLocaleString() + '-year closure comparison complete.');
+  });
+  field('batch').addEventListener('click', async () => {
+    if (field('batch').disabled) return;
+    const { dem, terrain, depths, riverDistance, population, predicted } = sourceInputs();
+    const exhaustive = field('search').value === 'all';
+    status('Preparing the scenario search…');
+    const output = await runWorker('weaklineBatch', dem, {
+      terrain, depths, riverDistance, population, candidates: result.candidates, periods, exhaustive,
+    });
+    if (!output) return;
+    batchOutput = { ...output, predicted, demSHA256: output.prepared.sourceSHA256,
+      report: { ...output.report, method: exhaustive ? 'Exhaustive' : 'Desktop-style bounded search',
+        screening: result.report } };
+    field('batch-metric').textContent = 'Ranking uses ' + batchOutput.report.metric +
+      '. Open depths fill artificial barrier cells for comparable scoring.';
+    field('batch-rows').replaceChildren(...batchOutput.report.periods.map(row => {
+      const tr = document.createElement('tr');
+      for (const value of [row.period, row.eligible.length, row.totalPossible, row.tested,
+        row.winner?.closed.join(', ') ?? 'Open baseline', row.winner?.score.toPrecision(6) ?? '—']) {
+        tr.insertCell().textContent = value;
+      }
+      return tr;
+    }));
+    field('batch-results').hidden = false;
+    onClosureChange?.();
+    status('Scenario search complete. Use Flood hazard maps to inspect the three modes.');
+  });
+  field('batch-report').addEventListener('click', () => {
+    if (batchOutput) download(batchOutput.report, 'siavash-weakline-scenarios.json');
   });
   field('toggle').addEventListener('click', () => toggle(Number(field('candidate').value)));
   field('period').addEventListener('change', () => { clearComparison(); status(''); refresh(); });
@@ -416,5 +520,5 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   });
   field('report').addEventListener('click', () => { if (result) download(result.report, 'siavash-weakline-screening.json'); });
   field('closure-report').addEventListener('click', () => { if (comparison) download(comparison, 'siavash-weakline-closure.json'); });
-  return { invalidate, refresh, getClosure: () => closureOutput };
+  return { invalidate, refresh, getScenarios: () => batchOutput };
 }

@@ -1,6 +1,6 @@
-import { createHazardPanel } from './hazard.mjs?v=1';
-import { createMLStackPanel } from './ml-stack.mjs?v=7';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=3';
+import { createHazardPanel } from './hazard.mjs?v=2';
+import { createMLStackPanel } from './ml-stack.mjs?v=8';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=4';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=4';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
@@ -981,7 +981,7 @@ async function requestSatellite({project,accessToken,expression,grid=null,bands=
 }
 
 /** Source decoding/worker. Google credentials never enter this worker. */
-function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null,computeHazards=null){
+function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null,computeHazards=null,runWeaklineScenarios=null){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg,nodata='-9999'){
@@ -1080,12 +1080,13 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           if (values.some(value => value < 0)) throw Error(period + '-year depth contains negative values.');
           depths[period] = values;
         }
-        const closure = data.closure ? {
-          period: data.closure.period,
-          depth: await read(data.closure.depth, data.closure.period + '-year closure depth'),
-        } : null;
-        const { rasters, coverage } = computeHazards({
-          width, height, periods: data.periods, depths, slope, manning, closure, clean: data.clean,
+        const scenarioDepths = {};
+        for (const [period, buffer] of Object.entries(data.scenarios ?? {})) {
+          scenarioDepths[period] = await read(buffer, period + '-year scenario depth');
+        }
+        const { rasters, coverage, champion } = computeHazards({
+          width, height, periods: data.periods, depths, slope, manning, scenarioDepths,
+          mode: data.mode, basis: data.basis, clean: data.clean,
         });
         const products = {}, transfer = [];
         for (const [name, values] of Object.entries(rasters)) {
@@ -1100,7 +1101,35 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           products[name] = { tiff, values: values.buffer, summary: { validCells, min: validCells ? min : null, max: validCells ? max : null } };
           transfer.push(tiff, values.buffer);
         }
-        self.postMessage({ products, coverage }, [...new Set(transfer)]);
+        self.postMessage({ products, coverage, champion }, [...new Set(transfer)]);
+        return;
+      }
+      if (data.action === 'weaklineBatch') {
+        if (!template || !runWeaklineScenarios) throw Error('Prepare the DEM before running scenarios.');
+        const { width, height, dx, dy, origin, epsg } = template;
+        const terrain = await readAlignedValues(data.terrain, true);
+        const riverDistance = data.riverDistance ? await readAlignedValues(data.riverDistance, true) : new Float32Array(width * height).fill(NaN);
+        const population = data.population ? await readAlignedValues(data.population, true).catch(() => null) : null;
+        const weights = population?.some(value => value > 0)
+          ? population.map(value => value >= 0 ? value * dx * dy / 1e6 : NaN) : null;
+        const envelope = {}, worst = {}, transfer = [], periods = [];
+        for (const period of data.periods) {
+          self.postMessage({ type: 'progress', message: 'Testing ' + period + '-year weakline states…' });
+          const inputDepth = await readAlignedValues(data.depths[period], true);
+          const result = runWeaklineScenarios({
+            candidates: data.candidates.filter(line => line.period === period), inputDepth,
+            terrain, riverDistance, population: weights, width, height, dx, exhaustive: data.exhaustive,
+            progress: (tested, total) => self.postMessage({ type: 'progress',
+              message: period + '-year event · ' + tested + ' tested of ' + total + ' possible non-open states.' }),
+          }, compareWeaklineClosure);
+          periods.push({ period, ...result.report });
+          if (!result.report.winner) continue;
+          envelope[period] = writeFloatTIFF(result.envelope, width, height, dx, dy, origin, epsg, 'nan');
+          worst[period] = writeFloatTIFF(result.worst, width, height, dx, dy, origin, epsg, 'nan');
+          transfer.push(envelope[period], worst[period]);
+        }
+        self.postMessage({ envelope, worst, report: { periods,
+          metric: weights ? 'population-weighted depth (person-metres)' : 'depth × cell area (m³)' } }, transfer);
         return;
       }
       if (data.action === 'screenWeaklines' || data.action === 'compareClosure') {
@@ -2280,14 +2309,15 @@ function decodeExposureLayers(group, bands, mask) {
   return layers;
 }
 
-function callAlignedRasterWorker(active, data, label) {
+function callAlignedRasterWorker(active, data, label, onProgress) {
   return new Promise((resolve, reject) => {
     const { worker } = active;
     const signal = active.controller.signal;
-    const timer = setTimeout(() => {
+    const startTimer = () => setTimeout(() => {
       worker.terminate();
       finish(reject, Error(label + ' raster processing timed out.'));
     }, 30000);
+    let timer = startTimer();
     function finish(callback, value) {
       clearTimeout(timer);
       signal.removeEventListener('abort', onAbort);
@@ -2297,7 +2327,11 @@ function callAlignedRasterWorker(active, data, label) {
     }
     function onAbort() { finish(reject, new DOMException('Cancelled', 'AbortError')); }
     worker.onmessage = ({ data: response }) => {
-      if (response.type === 'error') finish(reject, Error(response.message));
+      if (response.type === 'progress' && onProgress) {
+        clearTimeout(timer);
+        timer = startTimer();
+        onProgress(response.message);
+      } else if (response.type === 'error') finish(reject, Error(response.message));
       else finish(resolve, response);
     };
     worker.onerror = () => finish(reject, Error(label + ' raster worker could not load or decode the response.'));
@@ -2309,7 +2343,7 @@ function callAlignedRasterWorker(active, data, label) {
 }
 
 /** Exposure requests share the satellite transport and aligned raster worker. */
-function createExposurePanel({ element, readConnection }) {
+function createExposurePanel({ element, readConnection, onPopulationChange }) {
   const field = name => element('exp-' + name);
   let source = null;
   let job = null;
@@ -2331,7 +2365,9 @@ function createExposurePanel({ element, readConnection }) {
   function clear() {
     urls.forEach(url => URL.revokeObjectURL(url));
     urls = [];
+    const hadPopulation = outputs.some(product => product.name === 'population_density');
     outputs = [];
+    if (hadPopulation) onPopulationChange?.();
     report = null;
     for (const id of ['preview', 'downloads', 'layer']) field(id).replaceChildren();
     field('layer').disabled = true;
@@ -2379,6 +2415,7 @@ function createExposurePanel({ element, readConnection }) {
         continue;
       }
       outputs.push(product);
+      if (name === 'population_density') onPopulationChange?.();
       field('layer').add(new Option(label, name));
       const url = URL.createObjectURL(new Blob([tiff], { type: 'image/tiff' }));
       urls.push(url);
@@ -2499,11 +2536,12 @@ function createExposurePanel({ element, readConnection }) {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   });
 
-  return { refresh, setSource };
+  return { refresh, setSource, getProducts: () => outputs };
 }
 
 const exposurePanel = createExposurePanel({
   element: el,
+  onPopulationChange: () => queueMicrotask(() => weaklinePanel.invalidate()),
   readConnection: () => ({
     project: el('ee-project').value.trim(),
     accessToken: Date.now() < expiresAt ? token : null,
@@ -2534,7 +2572,7 @@ const weaklinePanel = createWeaklinePanel({
 const hazardPanel = createHazardPanel({
   element: el,
   readInputs: () => mlStackPanel.getFloodAnalysisInputs(),
-  readClosure: () => weaklinePanel.getClosure(),
+  readScenarios: () => weaklinePanel.getScenarios(),
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,
 });
@@ -2543,7 +2581,7 @@ const mlStackPanel = createMLStackPanel({
   onWeaklineInputsChange: () => { weaklinePanel.invalidate(); hazardPanel.invalidate(); },
   readSession: () => ({
     dem: terrainSource,
-    layers: [...terrainProducts, ...hydroProducts, ...linearProducts, ...satProducts, ...floodDepthPanel.getProducts()],
+    layers: [...terrainProducts, ...hydroProducts, ...linearProducts, ...satProducts, ...floodDepthPanel.getProducts(), ...exposurePanel.getProducts()],
   }),
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,

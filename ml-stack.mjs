@@ -355,6 +355,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     return {
       dem: localDEM ?? dem, terrain: get('dem_filled'), riverDistance: get('river_distance'),
       fittedDepth25: get('RP25_depth'), slope: get('slope'), manning: get('manning'),
+      population: get('population_density'),
       referenceDepths: Object.fromEntries(targetPeriods.map(period => [period, get('RP' + period + '_depth')])),
       trainedDepths,
     };
