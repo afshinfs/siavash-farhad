@@ -250,9 +250,9 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   }
   function refresh() {
     const { dem, method, reference, depths, terrain } = sourceInputs();
-    const waiting = !dem ? 'Provide a DEM above.'
+    const waiting = !dem ? 'Provide a DEM under Study area or Depth models.'
       : !reference ? method === 'depth25' ? 'Enable the Gumbel fit under GloFAS reference depths, or choose an aligned 25-year GeoTIFF here.'
-        : 'Calculate river distance above or open an aligned river_distance GeoTIFF in the raster stack.'
+        : 'Calculate river distance under Predictors or open an aligned river_distance GeoTIFF under Depth models.'
       : !periods.every(period => depths?.[period]) ? 'Provide all four depth rasters for the selected source.'
       : '';
     const selectedCandidates = result?.candidates.filter(candidate => selected.has(candidate.id)) ?? [];
@@ -279,7 +279,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     field('selection').textContent = selected.size
       ? 'Selected candidates ' + [...selected].join(', ') + '.'
       : 'Choose up to three candidates using the list or map.';
-    field('closure-ready').textContent = !terrain ? 'Run hydrology or open an aligned dem_filled GeoTIFF in the raster stack.'
+    field('closure-ready').textContent = !terrain ? 'Run hydrology under Terrain & hydrology or open an aligned dem_filled GeoTIFF under Depth models.'
       : tooEarly ? 'Choose a return period at or above the first screened period of every selected candidate.' : '';
   }
   function status(text, error = false) {

@@ -1,7 +1,8 @@
-import { createHazardPanel } from './hazard.mjs?v=2';
+import { appendRasterCard } from './raster-cards.mjs?v=1';
+import { createHazardPanel } from './hazard.mjs?v=3';
 import { createMLStackPanel } from './ml-stack.mjs?v=8';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=4';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=4';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=5';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=5';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -456,8 +457,8 @@ const terrainNames={slope:'Slope',aspect:'Aspect',trasp:'TRASP',plan_curvature:'
 function terrainMessage(text,error=false){el('terrain-message').textContent=text;el('terrain-message').className=error?'ee-message error':'ee-message';}
 function clearTerrainProducts(){mlStackPanel.invalidate();
   for(const url of terrainURLs)URL.revokeObjectURL(url);terrainURLs=[];terrainProducts=[];terrainReport=null;
-  el('terrain-downloads').replaceChildren();el('terrain-preview').replaceChildren();el('terrain-report').disabled=true;el('terrain-layer').disabled=true;
-  el('terrain-result').textContent='No terrain predictors computed yet.';
+  el('terrain-cards').replaceChildren();
+  el('terrain-report').disabled=true;
 }
 function stopTerrain(){clearTimeout(terrainTimer);terrainTimer=null;terrainEpoch++;terrainWorker?.terminate();terrainWorker=null;el('terrain-run').disabled=!terrainSource;el('terrain-cancel').disabled=true;el('terrain-file').disabled=false;}
 function setTerrainSource(blob,info=null){
@@ -470,16 +471,8 @@ function setTerrainSource(blob,info=null){
   mlStackPanel.refresh();
   weaklinePanel.refresh();
   hazardPanel.refresh();
-  el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
+  el('terrain-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM under Study area or open a downloaded DEM here.';
   el('terrain-run').disabled=!blob;terrainMessage(blob?'Elevation is ready for terrain processing.':'Terrain processing runs locally in your browser.');
-}
-function showTerrainLayer(){
-  const product=terrainProducts.find(p=>p.name===el('terrain-layer').value);if(!product||!terrainReport)return;
-  const canvas=document.createElement('canvas');canvas.width=terrainReport.width;canvas.height=terrainReport.height;
-  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview),canvas.width,canvas.height),0,0);
-  canvas.setAttribute('aria-label',terrainNames[product.name]+' raster preview');el('terrain-preview').replaceChildren(canvas);
-  const s=product.summary;
-  el('terrain-result').textContent=`${terrainNames[product.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`;
 }
 async function runTerrain(){
   if(!terrainSource)return;stopTerrain();clearTerrainProducts();const epoch=terrainEpoch;
@@ -498,9 +491,12 @@ async function runTerrain(){
       terrainProducts=data.products;terrainReport=data.report;mlStackPanel.invalidate();
       for(const p of terrainProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));terrainURLs.push(downloadURL);
-        const link=document.createElement('a');link.href=downloadURL;link.download=p.name+'_aligned.tif';link.textContent='Download '+terrainNames[p.name];el('terrain-downloads').append(link);
+        appendRasterCard(el('terrain-cards'), p, {
+          label: terrainNames[p.name], width: terrainReport.width, height: terrainReport.height,
+          url: downloadURL, filename: p.name + '_aligned.tif',
+        });
       }
-      el('terrain-report').disabled=false;el('terrain-layer').disabled=false;el('terrain-layer').value='slope';showTerrainLayer();
+      el('terrain-report').disabled=false;
       stopTerrain();terrainMessage(`Four terrain predictors computed in ${terrainReport.seconds.toFixed(2)} s. GeoTIFFs keep the DEM grid.`);
     };
     terrainWorker.onerror=()=>{if(epoch!==terrainEpoch)return;clearTimeout(timeout);stopTerrain();terrainMessage('The terrain worker could not run. Check your connection and try again.',true);};
@@ -514,7 +510,7 @@ el('terrain-file').addEventListener('change',()=>{
 });
 el('terrain-run').addEventListener('click',runTerrain);
 el('terrain-cancel').addEventListener('click',()=>{stopTerrain();clearTerrainProducts();terrainMessage('Terrain processing cancelled.');});
-el('terrain-layer').addEventListener('change',showTerrainLayer);
+
 el('terrain-report').addEventListener('click',()=>{
   if(!terrainReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(terrainReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-terrain-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
@@ -650,22 +646,14 @@ const hydroNames={dem_filled:'Filled DEM',flow_direction:'D8 flow direction',flo
 function hydroMessage(text,error=false){el('hydro-message').textContent=text;el('hydro-message').className=error?'ee-message error':'ee-message';}
 function clearHydroProducts(){mlStackPanel.invalidate();
   for(const url of hydroURLs)URL.revokeObjectURL(url);hydroURLs=[];hydroProducts=[];hydroReport=null;
-  el('hydro-downloads').replaceChildren();el('hydro-preview').replaceChildren();el('hydro-report').disabled=true;el('hydro-layer').disabled=true;
-  el('hydro-result').textContent='No hydrology layers computed yet.';
+  el('hydro-cards').replaceChildren();
+  el('hydro-report').disabled=true;
 }
 function stopHydro(){clearTimeout(hydroTimer);hydroTimer=null;hydroEpoch++;hydroWorker?.terminate();hydroWorker=null;el('hydro-run').disabled=!hydroSource;el('hydro-cancel').disabled=true;el('hydro-file').disabled=false;}
 function setHydroSource(blob,info=null){
   stopHydro();clearHydroProducts();hydroSource=blob;hydroSourceInfo=info;
-  el('hydro-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
+  el('hydro-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM under Study area or open a downloaded DEM here.';
   el('hydro-run').disabled=!blob;hydroMessage(blob?'Elevation is ready for hydrological processing.':'Hydrology processing runs locally in your browser.');
-}
-function showHydroLayer(){
-  const product=hydroProducts.find(p=>p.name===el('hydro-layer').value);if(!product||!hydroReport)return;
-  const canvas=document.createElement('canvas');canvas.width=hydroReport.width;canvas.height=hydroReport.height;
-  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview),canvas.width,canvas.height),0,0);
-  canvas.setAttribute('aria-label',hydroNames[product.name]+' raster preview');el('hydro-preview').replaceChildren(canvas);
-  const s=product.summary;
-  el('hydro-result').textContent=`${hydroNames[product.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`;
 }
 async function runHydro(){
   if(!hydroSource)return;stopHydro();clearHydroProducts();const epoch=hydroEpoch;
@@ -684,9 +672,12 @@ async function runHydro(){
       hydroProducts=data.products;hydroReport=data.report;mlStackPanel.invalidate();
       for(const p of hydroProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));hydroURLs.push(downloadURL);
-        const link=document.createElement('a');link.href=downloadURL;link.download=p.name+'_aligned.tif';link.textContent='Download '+hydroNames[p.name];el('hydro-downloads').append(link);
+        appendRasterCard(el('hydro-cards'), p, {
+          label: hydroNames[p.name], width: hydroReport.width, height: hydroReport.height,
+          url: downloadURL, filename: p.name + '_aligned.tif',
+        });
       }
-      el('hydro-report').disabled=false;el('hydro-layer').disabled=false;el('hydro-layer').value='flowacc';showHydroLayer();
+      el('hydro-report').disabled=false;
       stopHydro();hydroMessage(`Hydrology layers computed in ${hydroReport.seconds.toFixed(2)} s. GeoTIFFs keep the DEM grid.`);
     };
     hydroWorker.onerror=()=>{if(epoch!==hydroEpoch)return;clearTimeout(timeout);stopHydro();hydroMessage('The hydro worker could not run. Check your connection and try again.',true);};
@@ -700,7 +691,7 @@ el('hydro-file').addEventListener('change',()=>{
 });
 el('hydro-run').addEventListener('click',runHydro);
 el('hydro-cancel').addEventListener('click',()=>{stopHydro();clearHydroProducts();hydroMessage('Hydrology processing cancelled.');});
-el('hydro-layer').addEventListener('change',showHydroLayer);
+
 el('hydro-report').addEventListener('click',()=>{
   if(!hydroReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(hydroReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-hydro-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
@@ -844,22 +835,14 @@ const linearNames={river_distance:'Distance to rivers',road_distance:'Distance t
 function linearMessage(text,error=false){el('linear-message').textContent=text;el('linear-message').className=error?'ee-message error':'ee-message';}
 function clearLinearProducts(){mlStackPanel.invalidate();
   for(const url of linearURLs)URL.revokeObjectURL(url);linearURLs=[];linearProducts=[];linearReport=null;linearVectors=null;el('linear-vectors').disabled=true;if(linearMapLayer&&map)map.removeLayer(linearMapLayer);linearMapLayer=null;
-  el('linear-downloads').replaceChildren();el('linear-preview').replaceChildren();el('linear-report').disabled=true;el('linear-layer').disabled=true;
-  el('linear-result').textContent='No road/river predictors computed yet.';
+  el('linear-cards').replaceChildren();
+  el('linear-report').disabled=true;
 }
 function stopLinear(){clearTimeout(linearTimer);linearTimer=null;linearEpoch++;linearWorker?.terminate();linearWorker=null;el('linear-run').disabled=!linearSource;el('linear-cancel').disabled=true;el('linear-file').disabled=false;el('linear-osm-file').disabled=false;el('linear-live').disabled=false;el('linear-server').disabled=false;}
 function setLinearSource(blob,info=null){
   stopLinear();clearLinearProducts();linearSource=blob;linearSourceInfo=info;
-  el('linear-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a previously downloaded DEM.';
+  el('linear-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM under Study area or open a downloaded DEM here.';
   el('linear-run').disabled=!blob;linearMessage(blob?'DEM ready. Retrieve OSM features, or open saved OSM data.':'Road/river processing runs locally in your browser.');
-}
-function showLinearLayer(){
-  const product=linearProducts.find(p=>p.name===el('linear-layer').value);if(!product||!linearReport)return;
-  const canvas=document.createElement('canvas');canvas.width=linearReport.width;canvas.height=linearReport.height;
-  canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview),canvas.width,canvas.height),0,0);
-  canvas.setAttribute('aria-label',linearNames[product.name]+' raster preview');el('linear-preview').replaceChildren(canvas);
-  const s=product.summary;if(!s.validCells){el('linear-result').textContent=linearNames[product.name]+': no mapped features found; distance is NoData.';return;}
-  el('linear-result').textContent=`${linearNames[product.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`;
 }
 async function runLinear(){
   if(!linearSource)return;stopLinear();clearLinearProducts();const epoch=linearEpoch;
@@ -879,9 +862,12 @@ async function runLinear(){
       if(map&&window.L){linearMapLayer=window.L.geoJSON(linearVectors,{style:f=>({color:f.properties.kind==='river'?'#267ab2':'#b16e28',weight:3,opacity:0.9})}).addTo(map);}
       for(const p of linearProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));linearURLs.push(downloadURL);
-        const link=document.createElement('a');link.href=downloadURL;link.download=p.name+'_aligned.tif';link.textContent='Download '+linearNames[p.name];el('linear-downloads').append(link);
+        appendRasterCard(el('linear-cards'), p, {
+          label: linearNames[p.name], width: linearReport.width, height: linearReport.height,
+          url: downloadURL, filename: p.name + '_aligned.tif',
+        });
       }
-      el('linear-report').disabled=false;el('linear-layer').disabled=false;el('linear-layer').value='river_distance';showLinearLayer();
+      el('linear-report').disabled=false;
       stopLinear();linearMessage(`Road/river layers computed in ${linearReport.seconds.toFixed(2)} s. ${linearReport.featureCounts.rivers} river lines · ${linearReport.featureCounts.roads} major-road lines. ${linearReport.warnings.join(' ')}`);
     };
     linearWorker.onerror=()=>{if(epoch!==linearEpoch)return;clearTimeout(timeout);stopLinear();linearMessage('The linear worker could not run. Check your connection and try again.',true);};
@@ -895,7 +881,7 @@ el('linear-file').addEventListener('change',()=>{
 });
 el('linear-run').addEventListener('click',runLinear);
 el('linear-cancel').addEventListener('click',()=>{stopLinear();clearLinearProducts();linearMessage('Road/river processing cancelled.');});
-el('linear-layer').addEventListener('change',showLinearLayer);
+
 el('linear-report').addEventListener('click',()=>{
   if(!linearReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(linearReport,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='siavash-farhad-linear-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
 });
@@ -1211,16 +1197,26 @@ let satSource=null,satSourceInfo=null,satWorker=null,satEpoch=0,satBusy=false,sa
 const satNames={lulc:'Land cover',manning:'Manning n',ndvi:'Mean NDVI',ndvi_observations:'NDVI observations',rainfall:'Accumulated rainfall',spi_proxy:'Precipitation anomaly (SPI proxy)',hsg_proxy:'Soil-group proxy',merit_hnd:'MERIT adjusted elevation (hnd)'};
 const satGroupNames={worldcover:'WorldCover and Manning n',ndvi:'Sentinel-2 NDVI',rainfall:'CHIRPS rainfall',spi:'CHIRPS precipitation anomaly',soil:'OpenLandMap soil proxy',merit:'MERIT adjusted elevation'};
 function satelliteMessage(text,error=false){el('sat-message').textContent=text;el('sat-message').className=error?'ee-message error':'ee-message';}
-function refreshSatellite(){const connected=Boolean(token)&&Date.now()<expiresAt;el('sat-run').disabled=!satSource||!connected||satBusy;el('sat-cancel').disabled=!satBusy;el('sat-auth').textContent=connected?'Uses the Earth Engine connection above.':'Connect Google above, then retrieve or open a DEM.';for(const input of document.querySelectorAll('#sat-options input,#sat-options select,#sat-file'))input.disabled=satBusy;}
-function clearSatelliteProducts(){mlStackPanel.invalidate();for(const url of satURLs)URL.revokeObjectURL(url);satURLs=[];satProducts=[];satReport=null;el('sat-downloads').replaceChildren();el('sat-preview').replaceChildren();el('sat-layer').replaceChildren();el('sat-layer').disabled=true;el('sat-report').disabled=true;el('sat-result').textContent='No satellite predictors retrieved yet.';}
+function refreshSatellite(){const connected=Boolean(token)&&Date.now()<expiresAt;el('sat-run').disabled=!satSource||!connected||satBusy;el('sat-cancel').disabled=!satBusy;el('sat-auth').textContent=connected?'Uses the Earth Engine connection under Study area.':'Connect Google above, then retrieve or open a DEM.';for(const input of document.querySelectorAll('#sat-options input,#sat-options select,#sat-file'))input.disabled=satBusy;}
+function clearSatelliteProducts(){mlStackPanel.invalidate();for(const url of satURLs)URL.revokeObjectURL(url);satURLs=[];satProducts=[];satReport=null;el('sat-cards').replaceChildren();el('sat-report').disabled=true;}
 function stopSatellite(){satEpoch++;satAbort?.abort();satAbort=null;satWorker?.terminate();satWorker=null;if(satPending){satPending.reject(new DOMException('Cancelled','AbortError'));satPending=null;}satBusy=false;refreshSatellite();}
-function setSatelliteSource(blob,info=null){stopSatellite();clearSatelliteProducts();satSource=blob;satSourceInfo=info;el('sat-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a downloaded DEM.';satelliteMessage(blob?'DEM ready. Choose datasets and dates, then retrieve.':'Select the DEM grid and connect Earth Engine above.');refreshSatellite();}
+function setSatelliteSource(blob,info=null){stopSatellite();clearSatelliteProducts();satSource=blob;satSourceInfo=info;el('sat-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a downloaded DEM.';satelliteMessage(blob?'DEM ready. Choose datasets and dates, then retrieve.':'Select the DEM grid and connect Earth Engine under Study area.');refreshSatellite();}
 function satelliteWorkerCall(message,transfer=[]){return new Promise((resolve,reject)=>{if(satPending)return reject(Error('Satellite worker is already busy.'));const timer=setTimeout(()=>{if(satPending){satPending=null;reject(Error('Satellite decoding timed out.'));}},30000);satPending={expectedGroup:message.group,resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}};satWorker.postMessage(message,transfer);});}
-function showSatelliteLayer(){const p=satProducts.find(p=>p.name===el('sat-layer').value);if(!p||!satReport)return;const {width,height}=satReport.grid.dimensions,c=document.createElement('canvas');c.width=width;c.height=height;c.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(p.preview),width,height),0,0);c.setAttribute('aria-label',satNames[p.name]+' raster preview');el('sat-preview').replaceChildren(c);const s=p.summary;el('sat-result').textContent=s.validCells?`${satNames[p.name]}: ${s.min.toPrecision(5)} to ${s.max.toPrecision(5)} ${s.unit} · ${s.validCells.toLocaleString()} valid cells`:'No valid source data in this layer; its is NoData.';}
-function addSatelliteProducts(products){mlStackPanel.invalidate();for(const p of products){satProducts.push(p);const option=document.createElement('option');option.value=p.name;option.textContent=satNames[p.name];el('sat-layer').append(option);const url=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));satURLs.push(url);const a=document.createElement('a');a.href=url;a.download=p.name+'_aligned.tif';a.textContent='Download '+satNames[p.name];el('sat-downloads').append(a);}el('sat-layer').disabled=!satProducts.length;if(satProducts.length){if(!el('sat-layer').value)el('sat-layer').value=satProducts[0].name;showSatelliteLayer();}}
+function addSatelliteProducts(products) {
+  mlStackPanel.invalidate();
+  for (const product of products) {
+    satProducts.push(product);
+    const url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
+    satURLs.push(url);
+    appendRasterCard(el('sat-cards'), product, {
+      ...satReport.grid.dimensions, label: satNames[product.name],
+      url, filename: product.name + '_aligned.tif',
+    });
+  }
+}
 function readSatelliteSettings(){return validateSatelliteSettings({groups:Array.from(document.querySelectorAll('#sat-options input[data-sat-group]:checked')).map(i=>i.dataset.satGroup),worldcoverYear:el('sat-worldcover').value,ndviStart:el('sat-ndvi-start').value,ndviEnd:el('sat-ndvi-end').value,rainStart:el('sat-rain-start').value,rainEnd:el('sat-rain-end').value,baselineStartYear:el('sat-base-start').value,baselineEndYear:el('sat-base-end').value,targetMonth:el('sat-target').value,nmonths:el('sat-months').value});}
 async function runSatellite(){
-  let settings,project;try{settings=readSatelliteSettings();project=validateProject(el('ee-project').value.trim());if(!satSource)throw Error('Retrieve or open a DEM first.');if(!token||Date.now()>=expiresAt)throw Error('Connect your Google account above first.');}catch(e){satelliteMessage(e.message,true);return;}
+  let settings,project;try{settings=readSatelliteSettings();project=validateProject(el('ee-project').value.trim());if(!satSource)throw Error('Retrieve or open a DEM first.');if(!token||Date.now()>=expiresAt)throw Error('Connect your Google account under Study area first.');}catch(e){satelliteMessage(e.message,true);return;}
   stopSatellite();clearSatelliteProducts();satBusy=true;satAbort=new AbortController();const active=satEpoch,signal=satAbort.signal,started=performance.now();refreshSatellite();
   try{
     satelliteMessage('Preparing the exact DEM grid…');const buffer=await satSource.arrayBuffer();if(active!==satEpoch)return;
@@ -1249,7 +1245,7 @@ async function runSatellite(){
   finally{if(active===satEpoch){satWorker?.terminate();satWorker=null;satAbort=null;satBusy=false;refreshSatellite();}}
 }
 el('sat-file').addEventListener('change',()=>{const file=el('sat-file').files[0];if(!file)return;if(file.size>8*1024*1024){satelliteMessage('Use a DEM smaller than 8 MB.',true);return;}setSatelliteSource(file,{kind:'local file',label:file.name});});
-el('sat-run').addEventListener('click',runSatellite);el('sat-cancel').addEventListener('click',()=>{stopSatellite();if(satReport)satReport.status='cancelled';satelliteMessage('Satellite retrieval cancelled. Any completed layers remain available.');});el('sat-layer').addEventListener('change',showSatelliteLayer);
+el('sat-run').addEventListener('click',runSatellite);el('sat-cancel').addEventListener('click',()=>{stopSatellite();if(satReport)satReport.status='cancelled';satelliteMessage('Satellite retrieval cancelled. Any completed layers remain available.');});
 el('sat-report').addEventListener('click',()=>{if(!satReport)return;const url=URL.createObjectURL(new Blob([JSON.stringify(satReport,null,2)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='siavash-satellite-report.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 for(const input of document.querySelectorAll('#sat-options input,#sat-options select'))input.addEventListener('change',()=>{if(satProducts.length){stopSatellite();clearSatelliteProducts();satelliteMessage('Settings changed. Retrieve again to update the layers.');}});
 refreshSatellite();
@@ -2360,7 +2356,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
     field('run').disabled = !source || !connected || Boolean(job);
     field('cancel').disabled = !job;
     field('options').disabled = Boolean(job);
-    field('auth').textContent = connected ? 'Using the Earth Engine connection above.' : 'Connect your Google account above to retrieve exposure layers.';
+    field('auth').textContent = connected ? 'Using the Earth Engine connection under Study area.' : 'Connect your Google account under Study area to retrieve exposure layers.';
   }
   function clear() {
     urls.forEach(url => URL.revokeObjectURL(url));
@@ -2369,10 +2365,8 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
     outputs = [];
     if (hadPopulation) onPopulationChange?.();
     report = null;
-    for (const id of ['preview', 'downloads', 'layer']) field(id).replaceChildren();
-    field('layer').disabled = true;
+    field('cards').replaceChildren();
     field('report').disabled = true;
-    field('result').textContent = '';
   }
   function stop() {
     const active = job;
@@ -2385,26 +2379,11 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
     stop();
     clear();
     source = blob ? { blob, info } : null;
-    field('source').textContent = blob ? 'DEM ready · ' + (info?.label || 'retrieved elevation') : 'Retrieve a DEM above or open a DEM here.';
+    field('source').textContent = blob ? 'DEM ready · ' + (info?.label || 'retrieved elevation') : 'Retrieve a DEM under Study area or open one here.';
     message('');
     refresh();
   }
 
-  function showLayer() {
-    const product = outputs.find(item => item.name === field('layer').value);
-    if (!product) return;
-    const { width, height } = report.grid.dimensions;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    canvas.setAttribute('aria-label', exposureProducts[product.name].label + ' raster preview');
-    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview), width, height), 0, 0);
-    field('preview').replaceChildren(canvas);
-    const { min, max, validCells, unit } = product.summary;
-    field('result').textContent = validCells
-      ? `${min.toPrecision(4)} to ${max.toPrecision(4)} ${unit} · ${validCells.toLocaleString()} valid cells`
-      : 'No valid data on this DEM grid.';
-  }
   function addProducts(products) {
     for (const product of products) {
       const { name, summary, tiff } = product;
@@ -2416,17 +2395,12 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
       }
       outputs.push(product);
       if (name === 'population_density') onPopulationChange?.();
-      field('layer').add(new Option(label, name));
       const url = URL.createObjectURL(new Blob([tiff], { type: 'image/tiff' }));
       urls.push(url);
-      const link = document.createElement('a');
-      link.href = url;
-      link.download = name + '_aligned.tif';
-      link.textContent = 'Download ' + label;
-      field('downloads').append(link);
+      appendRasterCard(field('cards'), product, {
+        ...report.grid.dimensions, label, url, filename: name + '_aligned.tif',
+      });
     }
-    field('layer').disabled = !outputs.length;
-    showLayer();
   }
 
 
@@ -2525,7 +2499,6 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
     message(outputs.length ? 'Retrieval cancelled. Completed layers are available below.' : 'Retrieval cancelled.');
   });
   field('options').addEventListener('change', () => { clear(); message(''); });
-  field('layer').addEventListener('change', showLayer);
   field('report').addEventListener('click', () => {
     if (!report) return;
     const url = URL.createObjectURL(new Blob([JSON.stringify(report, null, 2)], { type: 'application/json' }));

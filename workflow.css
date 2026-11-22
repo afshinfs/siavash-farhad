@@ -1,0 +1,94 @@
+.workspace-title {
+  margin: 0 0 20px;
+  font-size: clamp(1.5rem, 3vw, 2rem);
+}
+
+.workflow-layout {
+  display: grid;
+  grid-template-columns: minmax(175px, 205px) minmax(0, 1fr);
+  gap: 22px;
+  align-items: start;
+}
+
+.workflow-content { min-width: 0; }
+.workflow-content > .panel:first-of-type { margin-top: 0; }
+
+.workflow-tabs {
+  display: grid;
+  position: sticky;
+  top: 16px;
+  padding: 9px;
+  gap: 4px;
+  background: #ebf2ee;
+  border: 1px solid #d8e4dc;
+  border-radius: 10px;
+}
+
+.workflow-tabs a {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  padding: 10px 9px;
+  border-radius: 7px;
+  color: #204d48;
+  font-size: .82rem;
+  font-weight: 650;
+  text-decoration: none;
+}
+.workflow-tabs a span {
+  min-width: 21px;
+  padding: 2px;
+  text-align: center;
+  border-radius: 4px;
+  background: #d7e5da;
+}
+.workflow-tabs a:hover { background: #dfece5; }
+.workflow-tabs a[aria-current="page"] { background: #194f49; color: white; }
+.workflow-tabs a[aria-current="page"] span { background: #39736a; }
+.workflow-tabs a:focus-visible { outline: 2px solid #28766a; outline-offset: 2px; }
+
+.workflow-content .panel-heading .eyebrow { margin: 0 0 8px; }
+.workflow-content .panel-heading h2 { margin: 0; }
+.layer-region { margin-top: 22px; border-top: 1px solid #e0e8e2; padding-top: 18px; }
+.layer-region h3 { margin-top: 0; font-size: 1rem; }
+
+.raster-grid, .dataset-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  gap: 12px;
+  margin: 0 0 14px;
+}
+
+.raster-card, .dataset-group {
+  min-width: 0;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid #d8e4dc;
+  border-radius: 8px;
+  background: #fbfdfb;
+}
+.raster-card h4 { margin: 0 0 9px; font-size: .87rem; }
+.raster-card canvas {
+  display: block;
+  width: 100%;
+  height: 130px;
+  object-fit: contain;
+  image-rendering: pixelated;
+  background: #eef3ef;
+  border-radius: 4px;
+}
+.raster-card p { margin: 8px 0; overflow-wrap: anywhere; }
+.raster-card a { font-size: .78rem; }
+.dataset-group legend { color: #204d48; font-size: .82rem; font-weight: 650; }
+.dataset-group .sat-checks { margin: 0; }
+.dataset-fields { display: grid; gap: 8px; margin-top: 10px; }
+.dataset-fields input, .dataset-fields select { width: 100%; min-width: 0; }
+
+@media (max-width: 980px) {
+  .workflow-layout .ee-layout { grid-template-columns: 1fr; }
+}
+@media (max-width: 700px) {
+  .workflow-layout { display: block; }
+  .workflow-tabs { position: static; display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; }
+  .workflow-tabs a { flex: none; white-space: nowrap; }
+}

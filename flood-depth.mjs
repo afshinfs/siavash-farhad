@@ -1,3 +1,4 @@
+import { appendRasterCard } from './raster-cards.mjs?v=1';
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
 const gumbelPeriods = [25, 30, 300, 1000];
@@ -124,10 +125,8 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     outputs = [];
     report = null;
     onChange();
-    for (const id of ['preview', 'downloads', 'layer']) field(id).replaceChildren();
-    field('result').textContent = '';
+    field('cards').replaceChildren();
     field('report').disabled = true;
-    field('layer').disabled = true;
   }
   function refresh() {
     const connected = Boolean(readConnection().accessToken);
@@ -137,8 +136,8 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     options.disabled = Boolean(active);
     field('run').textContent = field('gumbel').checked ? 'Retrieve depths and fit Gumbel' : 'Retrieve reference depths';
     field('auth').textContent = connected
-      ? 'Using the Earth Engine connection above.'
-      : 'Connect your Google account above to retrieve GloFAS depths.';
+      ? 'Using the Earth Engine connection under Study area.'
+      : 'Connect your Google account under Study area to retrieve GloFAS depths.';
   }
   function stop() {
     active?.controller.abort();
@@ -152,23 +151,9 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     source = blob ? { blob, info } : null;
     field('source').textContent = blob
       ? 'DEM ready · ' + (info?.label || 'retrieved elevation')
-      : 'Retrieve a DEM above or open a DEM here.';
+      : 'Retrieve a DEM under Study area or open one here.';
     message('');
     refresh();
-  }
-  function showLayer() {
-    const product = outputs.find(output => output.name === field('layer').value);
-    if (!product) return;
-    const { width, height } = report.grid.dimensions;
-    const canvas = document.createElement('canvas');
-    canvas.width = width;
-    canvas.height = height;
-    canvas.setAttribute('aria-label', product.label + ' preview');
-    canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(product.preview), width, height), 0, 0);
-    field('preview').replaceChildren(canvas);
-    const { min, max, validCells } = product.summary;
-    const coverage = new Intl.NumberFormat(undefined, { style: 'percent', maximumFractionDigits: 1 }).format(validCells / report.demValidCells);
-    field('result').textContent = `${min.toPrecision(4)} to ${max.toPrecision(4)} m · ${validCells.toLocaleString()} cells (${coverage} of valid DEM cells)`;
   }
   async function run() {
     if (!source || active) return;
@@ -231,17 +216,11 @@ const fit = ${fitGumbelDepths.toString()};
         const url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
         const label = period.toLocaleString() + '-year · ' + method;
         outputs.push({ ...product, label, url });
-        field('layer').add(new Option(label, product.name));
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = 'flood_' + period + 'yr_aligned.tif';
-        link.textContent = 'Download ' + label;
-        field('downloads').append(link);
+        appendRasterCard(field('cards'), product, {
+          ...report.grid.dimensions, label, url, filename: 'flood_' + period + 'yr_aligned.tif',
+        });
       }
       field('report').disabled = false;
-      field('layer').disabled = !outputs.length;
-      showLayer();
-      onChange();
       const missing = report.periodsWithoutValidData;
       report.status = outputs.length ? (missing.length ? 'partial' : 'completed') : 'no_data';
       message(
@@ -258,7 +237,6 @@ const fit = ${fitGumbelDepths.toString()};
 
   field('run').addEventListener('click', run);
   field('cancel').addEventListener('click', () => { stop(); message('Flood-depth retrieval cancelled.'); });
-  field('layer').addEventListener('change', showLayer);
   options.addEventListener('change', () => { clear(); message(''); refresh(); });
   field('file').addEventListener('change', event => {
     const file = event.target.files[0];

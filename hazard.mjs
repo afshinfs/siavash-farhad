@@ -193,15 +193,15 @@ export function createHazardPanel({ element, readInputs, readScenarios, rasterWo
   }
   function refresh() {
     const { dem, depths, slope, manning, available } = read();
-    const need = !dem ? 'Provide a DEM above.'
-      : !slope || !manning ? 'Provide aligned slope in degrees and Manning n from terrain and WorldCover, or load them in the raster stack.'
+    const need = !dem ? 'Provide a DEM under Study area or Depth models.'
+      : !slope || !manning ? 'Provide aligned slope in degrees and Manning n from terrain and WorldCover, or load them under Depth models.'
       : !periods.every(period => depths?.[period]) ? 'Provide all four depth rasters for this source.'
       : '';
     field('ready').textContent = need;
     const hasScenarios = Boolean(available && Object.keys(available.worst).length);
     field('closure-note').textContent = hasScenarios
       ? 'Completed weakline scenarios are available for this depth source.'
-      : 'Run the Stage 12 scenario search with this depth source to enable Weaklines and Worst-case.';
+      : 'Run the search under Weakline scenarios with this depth source to enable Weaklines and Worst-case.';
     for (const option of field('mode').options) {
       option.disabled = option.value !== 'baseline' && !hasScenarios;
     }
