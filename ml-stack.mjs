@@ -9,6 +9,8 @@ const targetPeriods = [30, 100, 300, 1000];
 const depths = Object.fromEntries(targetPeriods.map(period => ['RP' + period + '_depth', period]));
 const expected = [...Object.keys(predictors), ...Object.keys(depths)];
 
+const riskExtras = ["nightlights","builtup_fraction","population_density","building_footprint_mask","building_presence_proxy"];
+
 function localLayerName(filename) {
   const name = filename.toLowerCase().replace(/\.tiff?$/, '').replace(/_aligned$/, '');
   const period = name.match(/^flood_(30|100|300|1000)yr$/);
@@ -320,7 +322,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     const ignored = [];
     for (const file of files) {
       const key = localLayerName(file.name);
-      if (!expected.includes(key)) { ignored.push(file.name); continue; }
+      if (!expected.includes(key) && !riskExtras.includes(key)) { ignored.push(file.name); continue; }
       if (seen.has(key) || file.size > 8 * 1024 * 1024) {
         message('Choose one GeoTIFF per layer, up to 8 MB each. Check ' + file.name + '.', true);
         return;
@@ -354,6 +356,9 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     const get = name => localLayers.get(name) ?? layers.find(layer => layer.name === name)?.tiff;
     return {
       dem: localDEM ?? dem, terrain: get('dem_filled'), riverDistance: get('river_distance'),
+      buildingSource: get('building_footprint_mask') ? 'Mapped footprints' : get('building_presence_proxy') ? 'Building presence proxy' : null,
+      riskLayers: { nightlights:get('nightlights'), builtup:get('builtup_fraction'), population:get('population_density'),
+        buildings:get('building_footprint_mask') ?? get('building_presence_proxy'), slope:get('slope'), river:get('river_distance'), road:get('road_distance') },
       fittedDepth25: get('RP25_depth'), slope: get('slope'), manning: get('manning'),
       population: get('population_density'),
       referenceDepths: Object.fromEntries(targetPeriods.map(period => [period, get('RP' + period + '_depth')])),

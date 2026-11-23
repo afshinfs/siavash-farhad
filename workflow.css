@@ -92,3 +92,14 @@
   .workflow-tabs { position: static; display: flex; gap: 6px; overflow-x: auto; margin-bottom: 16px; }
   .workflow-tabs a { flex: none; white-space: nowrap; }
 }
+
+.step-pager {display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;margin:18px 0}
+.step-pager a,#risk-panel select {padding:10px 12px;border:1px solid #bdcfc5;border-radius:6px;background:white;color:#204d48;font:inherit}
+#step-next {margin-left:auto}
+#risk-ready,#risk-status {font-size:.88rem;line-height:1.6}
+#risk-maps canvas {margin:12px 0;background:repeating-conic-gradient(#f8faf9 0 25%,#e3eae6 0 50%) 0 0/14px 14px}
+.workflow-content > .panel {scroll-margin-top:12px}
+@media(max-width:700px){
+  .workflow-tabs {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}
+  .workflow-tabs a {white-space:normal;padding:7px;line-height:1.3}
+}

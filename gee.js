@@ -1,6 +1,7 @@
+import { createRiskPanel } from './risk.mjs';
 import { appendRasterCard } from './raster-cards.mjs?v=1';
-import { createHazardPanel } from './hazard.mjs?v=3';
-import { createMLStackPanel } from './ml-stack.mjs?v=8';
+import { createHazardPanel } from './hazard.mjs?v=4';
+import { createMLStackPanel } from './ml-stack.mjs?v=9';
 import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=5';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=5';
 
@@ -967,7 +968,7 @@ async function requestSatellite({project,accessToken,expression,grid=null,bands=
 }
 
 /** Source decoding/worker. Google credentials never enter this worker. */
-function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null,computeHazards=null,runWeaklineScenarios=null){
+function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup,extraUnits={},auditRasterStack=null,screenWeaklines=null,compareWeaklineClosure=null,computeHazards=null,runWeaklineScenarios=null,computeRisk=null){
   importScripts('https://cdn.jsdelivr.net/npm/geotiff@2.1.3/dist-browser/geotiff.js','https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js');
   let template=null;
   function writeFloatTIFF(values,width,height,dx,dy,origin,epsg,nodata='-9999'){
@@ -1045,6 +1046,25 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         const result = await auditRasterStack(data, template, readAlignedRaster);
         const trainingEntries = result.passed ? normalized : [];
         self.postMessage({ result, trainingEntries }, trainingEntries.map(entry => entry.raster));
+        return;
+      }
+      if (data.action === 'risk') {
+        const { width,height,mask,dx,dy,origin,epsg } = template;
+        const layers = {};
+        for (const [name,raster] of Object.entries(data.layers)) {
+          if (!raster) continue;
+          self.postMessage({type:'progress',message:'Checking '+name+' coverage…'});
+          try { layers[name] = await readAlignedValues(raster,true); }
+          catch(error) { throw Error(name+' · '+error.message); }
+        }
+        const {rasters,...report} = computeRisk({...data,layers,width,mask});
+        const products = {}, transfer = [];
+        for (const [name,values] of Object.entries(rasters)) {
+          const tiff = writeFloatTIFF(values,width,height,dx,dy,origin,epsg,'nan');
+          products[name] = {tiff,values:values.buffer};
+          transfer.push(tiff,values.buffer);
+        }
+        self.postMessage({...report,products},transfer);
         return;
       }
       if (data.action === 'hazard') {
@@ -2339,7 +2359,7 @@ function callAlignedRasterWorker(active, data, label, onProgress) {
 }
 
 /** Exposure requests share the satellite transport and aligned raster worker. */
-function createExposurePanel({ element, readConnection, onPopulationChange }) {
+function createExposurePanel({ element, readConnection, onPopulationChange, onExposureChange }) {
   const field = name => element('exp-' + name);
   let source = null;
   let job = null;
@@ -2364,6 +2384,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
     const hadPopulation = outputs.some(product => product.name === 'population_density');
     outputs = [];
     if (hadPopulation) onPopulationChange?.();
+    onExposureChange?.();
     report = null;
     field('cards').replaceChildren();
     field('report').disabled = true;
@@ -2394,6 +2415,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
         continue;
       }
       outputs.push(product);
+      onExposureChange?.();
       if (name === 'population_density') onPopulationChange?.();
       const url = URL.createObjectURL(new Blob([tiff], { type: 'image/tiff' }));
       urls.push(url);
@@ -2514,6 +2536,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange }) {
 
 const exposurePanel = createExposurePanel({
   element: el,
+  onExposureChange: () => queueMicrotask(() => riskPanel.reset()),
   onPopulationChange: () => queueMicrotask(() => weaklinePanel.invalidate()),
   readConnection: () => ({
     project: el('ee-project').value.trim(),
@@ -2545,6 +2568,7 @@ const weaklinePanel = createWeaklinePanel({
 const hazardPanel = createHazardPanel({
   element: el,
   readInputs: () => mlStackPanel.getFloodAnalysisInputs(),
+  onChange: () => queueMicrotask(() => riskPanel.reset()),
   readScenarios: () => weaklinePanel.getScenarios(),
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,
@@ -2559,6 +2583,14 @@ const mlStackPanel = createMLStackPanel({
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,
 });
+const riskPanel = createRiskPanel({
+  element: el, rasterWorker: satelliteWorkerMain, callWorker: callAlignedRasterWorker,
+  read: () => {
+    const { dem, riskLayers: layers, buildingSource } = mlStackPanel.getFloodAnalysisInputs();
+    return {dem,layers,buildingSource,hazard:hazardPanel.getResult()};
+  },
+});
+riskPanel.refresh();
 mlStackPanel.refresh();
 weaklinePanel.invalidate();
 hazardPanel.refresh();

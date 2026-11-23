@@ -98,9 +98,9 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
     }
     return { periodAtCell, firstClass };
   }
-  function foenDanger(layers) {
+  function foenDanger(layers, filter = true) {
     const { periodAtCell, firstClass } = firstExceedance(layers);
-    const intensity = cleanClasses(firstClass);
+    const intensity = filter ? cleanClasses(firstClass) : firstClass;
     const matrix = { 30: [0, 2, 2, 3], 100: [0, 1, 2, 3], 300: [0, 1, 1, 3], 1000: [0, 4, 4, 4] };
     return intensity.map((code, i) => code > 0 ? matrix[periodAtCell[i]][code] : code);
   }
@@ -151,12 +151,20 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   const depthCount = significant(rasters.foen_depth_danger), dvCount = significant(rasters.foen_dv_danger);
   const chosen = basis === 'auto' ? (dvCount > depthCount ? 'dv' : 'depth') : basis;
   rasters.foen_champion = chosen === 'dv' ? rasters.foen_dv_danger : rasters.foen_depth_danger;
+  const chosenIntensity = chosen === 'dv' ? 'intensityDV' : 'intensityD';
+  const finalDanger = foenDanger(composite.map(item => item[chosenIntensity]), false);
+  if (mode === 'weaklines') {
+    const baselineDanger = foenDanger(base.map(item => item[chosenIntensity]), false);
+    const severity = [0,2,3,4,1];
+    rasters.foen_final = finalDanger.map((v,i) => severity[baselineDanger[i]] > severity[v] ? baselineDanger[i] : v);
+  } else rasters.foen_final = finalDanger;
   return { rasters, coverage, champion: { basis: chosen, selection: basis, depthCount, dvCount } };
 }
 
 const periods = [30, 100, 300, 1000];
 
 function productDescription(name) {
+  if (name === 'foen_final') return ['FOEN final danger matrix for risk', 'danger'];
   if (name === 'foen_champion') return ['FOEN champion danger', 'danger'];
   if (name === 'foen_depth_danger') return ['FOEN danger · depth', 'danger'];
   if (name === 'foen_dv_danger') return ['FOEN danger · depth × velocity', 'danger'];
@@ -174,7 +182,7 @@ function productDescription(name) {
   return [label + ' · ' + Number(match[2]).toLocaleString() + ' years', type];
 }
 
-export function createHazardPanel({ element, readInputs, readScenarios, rasterWorker, callWorker }) {
+export function createHazardPanel({ element, readInputs, readScenarios, onChange, rasterWorker, callWorker }) {
   const field = name => element('hazard-' + name);
   let active = null, result = null, url = null;
   const legends = {
@@ -228,6 +236,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, rasterWo
     active?.worker?.terminate();
     active = null;
     result = null;
+    onChange();
     clearDownload();
     field('results').hidden = true;
     status('');
@@ -322,6 +331,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, rasterWo
         codebook: legends, coverage, products: Object.fromEntries(Object.entries(products).map(([name, product]) =>
           [name, { label: productDescription(name)[0], ...product.summary }])),
       } };
+      onChange();
       const names = Object.keys(products).sort((a, b) => Number(/_\d+$/.test(a)) - Number(/_\d+$/.test(b)));
       field('layer').replaceChildren(...names.map(name => new Option(productDescription(name)[0], name)));
       field('layer').value = 'adr7_envelope';
@@ -354,5 +364,5 @@ export function createHazardPanel({ element, readInputs, readScenarios, rasterWo
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   });
-  return { invalidate, refresh, closureChanged: () => field('mode').value !== 'baseline' ? invalidate() : queueMicrotask(refresh) };
+  return { invalidate, refresh, getResult: () => result, closureChanged: () => field('mode').value !== 'baseline' ? invalidate() : queueMicrotask(refresh) };
 }
