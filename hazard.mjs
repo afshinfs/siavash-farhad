@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=single-map';
+import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=map-legends';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, mode = 'baseline', basis = 'auto', clean }) {
   const size = width * height;
@@ -12,7 +12,7 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
     for (let i = 0; i < size; i++) {
       const h = depth[i];
       if (!Number.isFinite(h) || h < 0) continue;
-      const wet = h >= wetDepth;
+      const wet = h > wetDepth;
       intensityD[i] = wet ? (h >= 2 ? 3 : h >= 0.5 ? 2 : 1) : 0;
       if (!wet) {
         adr[i] = 0;
@@ -26,7 +26,7 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
       const dv = Math.fround(h * v);
       velocity[i] = v;
       product[i] = dv;
-      intensityDV[i] = dv >= 2 ? 3 : dv >= 0.5 ? 2 : 1;
+      intensityDV[i] = dv >= 2 ? 3 : dv >= 0.5 ? 2 : dv > wetDepth ? 1 : 0;
       const level = adrLimits.findIndex(([maxH, maxV, maxDV]) => h <= maxH && v <= maxV && dv <= maxDV);
       adr[i] = level === -1 ? 6 : level + 1;
     }
@@ -79,19 +79,16 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
     }
     return updated;
   }
-  function overlay(baseline, scenario) {
-    if (!scenario) return baseline;
-    return baseline.map((value, i) => Number.isFinite(value) && Number.isFinite(scenario[i])
-      ? Math.max(value, scenario[i]) : value);
-  }
   function firstExceedance(layers) {
     const periodAtCell = floats(), firstClass = floats();
     for (let i = 0; i < size; i++) {
       for (let k = 0; k < periods.length; k++) {
         const value = layers[k][i];
-        if (!Number.isFinite(value)) break;
-        if (value > 0 || k === periods.length - 1) {
-          periodAtCell[i] = value > 0 ? periods[k] : 0;
+        if (!Number.isFinite(value)) continue;
+        periodAtCell[i] = 0;
+        firstClass[i] = 0;
+        if (value > 0) {
+          periodAtCell[i] = periods[k];
           firstClass[i] = value;
           break;
         }
@@ -101,22 +98,20 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   }
   function foenDanger(layers, filter = true) {
     const { periodAtCell, firstClass } = firstExceedance(layers);
+    for (let i=0;i<size;i++) if(periodAtCell[i]===1000) firstClass[i]=1;
     const intensity = filter ? cleanClasses(firstClass) : firstClass;
-    const matrix = { 30: [0, 2, 2, 3], 100: [0, 1, 2, 3], 300: [0, 1, 1, 3], 1000: [0, 4, 4, 4] };
-    return intensity.map((code, i) => code > 0 ? matrix[periodAtCell[i]][code] : code);
+    const matrix = {30:[0,3,6,9],100:[0,2,5,8],300:[0,1,4,7],1000:[0,10,10,10]};
+    return intensity.map((code,i) => code>0 ? matrix[periodAtCell[i]][code] : code);
   }
-  const base = [], composite = [], coverage = {};
+  const dangerGroup = code => [0,1,1,2,1,2,2,3,3,3,4][code] ?? NaN;
+  const composite = [], coverage = {};
   for (const period of periods) {
     const baseline = classify(depths[period]);
     const modified = scenarioDepths[period] ? classify(scenarioDepths[period]) : null;
-    const baselineADR = cleanClasses(baseline.adr);
-    const weaklines = mode === 'weaklines' && modified;
-    const worst = mode === 'worst' && modified;
-    const adr = weaklines ? overlay(baselineADR, cleanClasses(modified.adr))
-      : worst ? cleanClasses(modified.adr) : baselineADR;
-    const intensityD = modified?.intensityD ?? baseline.intensityD;
-    const intensityDV = modified?.intensityDV ?? baseline.intensityDV;
-    base.push({ adr: baselineADR, intensityD: baseline.intensityD, intensityDV: baseline.intensityDV });
+    const selected = modified ?? baseline;
+    const adr = cleanClasses(selected.adr);
+    const intensityD = cleanClasses(selected.intensityD);
+    const intensityDV = cleanClasses(selected.intensityDV);
     composite.push({ adr, intensityD, intensityDV });
     rasters['adr7_' + period] = adr;
     rasters['foen_depth_intensity_' + period] = intensityD;
@@ -136,35 +131,29 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
     coverage[period] = { validDepthCells, wetCells, wetCellsWithVelocity: hydraulicCells };
   }
   for (const [name, field] of [['foen_depth_danger', 'intensityD'], ['foen_dv_danger', 'intensityDV']]) {
-    // FOEN residual is ordered by severity below Low, even though its map code is 4.
-    const danger = foenDanger(composite.map(item => item[field]));
-    const baseline = mode === 'weaklines' ? foenDanger(base.map(item => item[field])) : danger;
-    const severity = [0, 2, 3, 4, 1];
-    rasters[name] = danger.map((code, i) => severity[baseline[i]] > severity[code] ? baseline[i] : code);
+    rasters[name] = foenDanger(composite.map(item => item[field])).map(dangerGroup);
   }
-  const envelope = items => cleanClasses(items[0].adr.map((_, i) =>
-    Math.max(...items.map(item => item.adr[i]))));
-  rasters.adr7_envelope = mode === 'weaklines' ? overlay(envelope(base), envelope(composite)) : envelope(composite);
+  rasters.adr7_envelope = cleanClasses(composite[0].adr.map((_,i)=>{
+    const values=composite.map(item=>item.adr[i]).filter(Number.isFinite);
+    return values.length ? Math.max(...values) : NaN;
+  }));
   const first = firstExceedance(composite.map(item => item.adr));
   rasters.adr7_first_period = first.periodAtCell;
-  rasters.adr7_first_class = first.firstClass;
+  rasters.adr7_first_class = cleanClasses(first.firstClass);
   const significant = values => values.reduce((count, code) => count + Number(code === 3), 0);
   const depthCount = significant(rasters.foen_depth_danger), dvCount = significant(rasters.foen_dv_danger);
   const chosen = basis === 'auto' ? (dvCount > depthCount ? 'dv' : 'depth') : basis;
   rasters.foen_champion = chosen === 'dv' ? rasters.foen_dv_danger : rasters.foen_depth_danger;
   const chosenIntensity = chosen === 'dv' ? 'intensityDV' : 'intensityD';
-  const finalDanger = foenDanger(composite.map(item => item[chosenIntensity]), false);
-  if (mode === 'weaklines') {
-    const baselineDanger = foenDanger(base.map(item => item[chosenIntensity]), false);
-    const severity = [0,2,3,4,1];
-    rasters.foen_final = finalDanger.map((v,i) => severity[baselineDanger[i]] > severity[v] ? baselineDanger[i] : v);
-  } else rasters.foen_final = finalDanger;
+  rasters.foen_matrix = foenDanger(composite.map(item => item[chosenIntensity]), false);
+  rasters.foen_final = rasters.foen_matrix.map(dangerGroup);
   return { rasters, coverage, champion: { basis: chosen, selection: basis, depthCount, dvCount } };
 }
 
 const periods = [30, 100, 300, 1000];
 
 function productDescription(name) {
+  if (name === 'foen_matrix') return ['FOEN frequency–intensity matrix', 'matrix'];
   if (name === 'foen_final') return ['FOEN final danger matrix for risk', 'danger'];
   if (name === 'foen_champion') return ['FOEN champion danger', 'danger'];
   if (name === 'foen_depth_danger') return ['FOEN danger · depth', 'danger'];
@@ -192,6 +181,9 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
     intensity: [[0, 'Dry / no class', '#edf3ee'], [1, 'Low', '#ecd779'], [2, 'Middle', '#e49453'], [3, 'High', '#a12639']],
     period: [[0, 'No classified exceedance', '#edf3ee'], [30, '30 years', '#9a3050'], [100, '100 years', '#d17338'], [300, '300 years', '#36838a'], [1000, '1,000 years', '#7f6ba9']],
   };
+  legends.matrix = [[0,'Dry / no class','#edf3ee'],[1,'300 yr · low','#efcf58'],[2,'100 yr · low','#efcf58'],[3,'30 yr · low','#628fce'],
+    [4,'300 yr · middle','#efcf58'],[5,'100 yr · middle','#628fce'],[6,'30 yr · middle','#628fce'],
+    [7,'300 yr · high','#a12639'],[8,'100 yr · high','#a12639'],[9,'30 yr · high','#a12639'],[10,'Residual','#bab3c7']];
   const fromHex = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
   function read() {
     const inputs = readInputs();
@@ -266,17 +258,17 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
     const unit = type === 'velocity' ? 'm/s' : 'm²/s';
     legendNode.replaceChildren();
     if (legend) {
-      for (const [code, text, hex] of legend) {
+      for (const [, text, hex] of (type === 'matrix' ? legends.danger : legend)) {
         const item = document.createElement('span');
         const swatch = document.createElement('span');
         swatch.className = 'hazard-swatch';
         swatch.style.backgroundColor = hex;
         swatch.setAttribute('aria-hidden', 'true');
-        item.append(swatch, code + ' ' + text);
+        item.append(swatch, text);
         legendNode.append(item);
       }
     } else {
-      legendNode.append('Colour scale 0–' + max.toLocaleString(undefined, { maximumFractionDigits: 2 }) + ' ' + unit);
+      legendNode.append(rangeLegend(0,max,unit,'#daefeb',max?'#2c6795':'#daefeb'));
     }
     const noData = document.createElement('span');
     noData.textContent = 'Transparent = NoData';
@@ -330,7 +322,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
         wetDepthM: 0.05, velocity: { formula: 'max(h, 0.10)^(2/3) * sqrt(S) / n',
           slope: 'tan(slopeDegrees × pi / 180)', gradientRange: [0.00001, 0.01], roughnessRange: [0.01, 0.20], maxMps: 20 },
         clean: clean ? 'Remove four-connected groups under six cells, then apply a 3 × 3 majority update to positive classes.' : null,
-        noData: 'Dry is 0 in categorical rasters. Velocity and D×V are NoData for dry cells or missing terrain inputs. Earlier missing coverage prevents a first-exceedance assignment.',
+        noData: 'Dry is 0 in categorical rasters. Velocity and D×V are NoData for dry cells or missing terrain inputs. First exceedance uses the earliest available classified period.',
         codebook: legends, coverage, products: Object.fromEntries(Object.entries(products).map(([name, product]) =>
           [name, { label: productDescription(name)[0], ...product.summary }])),
       } };

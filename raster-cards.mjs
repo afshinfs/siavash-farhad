@@ -81,7 +81,7 @@ class StudyAreaMap extends HTMLElement {
     ]);
     const url = rasterImage(canvas, grid, projection, extent);
     if (this.overlay) this.overlay.setUrl(url);
-    else this.overlay = L.imageOverlay(url, bounds, { opacity: 0.68, className: 'study-area-raster' }).addTo(this.map);
+    else this.overlay = L.imageOverlay(url, bounds, { opacity: 0.83, className: 'study-area-raster' }).addTo(this.map);
     canvas.hidden = true;
     this.dirty = false;
   }
@@ -113,6 +113,47 @@ export function showStudyArea(parent, grid, canvas = parent.querySelector(':scop
   if (view.map) view.render();
 }
 
+const worldCover = [
+  ['Tree cover','#006400'], ['Shrubland','#ffbb22'], ['Grassland','#ffff4c'],
+  ['Cropland','#f096ff'], ['Built-up','#fa0000'], ['Bare or sparse vegetation','#b4b4b4'],
+  ['Snow and ice','#f0f0f0'], ['Permanent water','#0064c8'], ['Herbaceous wetland','#0096a0'],
+  ['Mangroves','#00cf75'], ['Moss and lichen','#fae6a0'],
+];
+const soil = [['Group A','#50b4eb'],['Group B','#64be64'],['Group C','#ebb93c'],['Group D','#af5541']];
+const directions = ['Outlet','East','Southeast','South','Southwest','West','Northwest','North','Northeast'];
+const directionColors = ['#8e8e8e','#d73027','#fc8d59','#fee090','#91cf60','#1a9850','#3288bd','#5149a4','#b358a5'];
+const fmt = value => value.toLocaleString(undefined,{maximumSignificantDigits:4});
+
+export function rangeLegend(min, max, unit, start='#285752', end='#e6e0a2', log=false) {
+  const legend = document.createElement('span');
+  legend.className = 'range-legend';
+  const bar = document.createElement('span');
+  bar.className = 'range-bar';
+  bar.style.background = min === max ? 'color-mix(in srgb,'+start+' 50%, '+end+')' : 'linear-gradient(to right,'+start+','+end+')';
+  const ticks = document.createElement('span');
+  ticks.className = 'range-ticks';
+  const mid = log ? min + Math.expm1(Math.log1p(max-min)/2) : (min+max)/2;
+  for (const value of min === max ? [min] : [min,mid,max]) {
+    const label = document.createElement('span');
+    label.textContent = fmt(value);
+    ticks.append(label);
+  }
+  legend.append(unit + (log ? ' · logarithmic scale' : ''),bar,ticks);
+  return legend;
+}
+
+function categoricalLegend(entries) {
+  const legend = document.createElement('div');
+  legend.className = 'map-legend';
+  for (const [label,color] of entries) {
+    const item = document.createElement('span'), swatch = document.createElement('i');
+    swatch.style.backgroundColor=color;
+    item.append(swatch,label);
+    legend.append(item);
+  }
+  return legend;
+}
+
 export function appendRasterCard(container, product, { label, width, height, grid, url, filename }) {
   const card = document.createElement('section');
   card.className = 'raster-card';
@@ -133,6 +174,12 @@ export function appendRasterCard(container, product, { label, width, height, gri
     const pixels = new Uint8ClampedArray(product.preview);
     canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
     card.append(canvas);
+    const categories = product.name === 'lulc' ? worldCover : product.name === 'hsg_proxy' ? soil
+      : product.name === 'flow_direction' ? directions.map((label,i)=>[label,directionColors[i]])
+      : ['building_presence_proxy','building_footprint_mask'].includes(product.name)
+        ? [['No mapped building','#285752'],['Building present','#e6e0a2']] : null;
+    card.append(categories ? categoricalLegend(categories) : rangeLegend(min,max,unit || label,undefined,undefined,product.name === 'flowacc'));
+    showStudyArea(card, grid, canvas);
   }
   const summary = document.createElement('p');
   summary.className = 'ee-help';
@@ -151,6 +198,6 @@ export function appendRasterCard(container, product, { label, width, height, gri
     link.setAttribute('aria-label', 'Download ' + label + ' GeoTIFF');
     card.append(link);
   }
-  showStudyArea(card, grid);
+
   container.append(card);
 }

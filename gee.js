@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs?v=single-map';
-import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=single-map';
-import { createHazardPanel } from './hazard.mjs?v=single-map';
-import { createMLStackPanel } from './ml-stack.mjs?v=single-map';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=single-map';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=single-map';
+import { createRiskPanel } from './risk.mjs?v=map-legends';
+import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=map-legends';
+import { createHazardPanel } from './hazard.mjs?v=map-legends';
+import { createMLStackPanel } from './ml-stack.mjs?v=map-legends';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=map-legends';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=map-legends';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -161,7 +161,7 @@ function refresh() {
   el('ee-connect').disabled=busy||pendingAuth;el('ee-disconnect').disabled=!token&&!busy&&!pendingAuth&&!el('ee-remember').checked&&
     !el('ee-project').value&&!el('ee-client').value;
   el('ee-fetch').disabled=!connected||!grid||busy||drawing;el('ee-cancel').disabled=!busy;
-  for(const id of ['ee-client','ee-project','west','south','east','north','ee-apply','ee-preset','ee-draw']) el(id).disabled=busy;
+  for(const id of ['ee-client','ee-project','west','south','east','north','ee-apply','ee-preset','ee-aqqala','ee-draw']) el(id).disabled=busy;
 }
 function clearDrawingPreview() {
   if(drawingPreview&&map)map.removeLayer(drawingPreview);
@@ -184,7 +184,7 @@ function applyBounds(bounds,{fit=true}={}) {
   const b=validateBounds(bounds);
   if(!window.proj4) throw new Error('Projection library has not loaded. Check your connection and reload.');
   const nextGrid=makeGrid(b,(projection,point)=>window.proj4('EPSG:4326',projection,point));
-  selected=b;grid=nextGrid;clearResult();
+  selected=b;grid=nextGrid;clearResult();el('ee-map-key').hidden=false;
   for(const k of ['west','south','east','north']) el(k).value=Number(b[k].toFixed(6));
   el('ee-area').textContent=`${b.areaKm2.toFixed(2)} km² · ${grid.dimensions.width} × ${grid.dimensions.height} cells · ${grid.crsCode}`;
   if(map) {
@@ -238,6 +238,7 @@ function drawElevation(data,requestedGrid) {
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.rgba),width,height),0,0);
   el('ee-preview').replaceChildren(canvas);canvas.setAttribute('aria-label','SRTM elevation preview; relative elevation colours');
   showStudyArea(el('ee-preview'), requestedGrid);
+  el('ee-preview').append(rangeLegend(data.summary.minElevationM,data.summary.maxElevationM,'Elevation (m)','#305a52','#dfd4ac'));
   // Keep the preview in its native UTM grid. Avoid draping a UTM image on a
   // latitude/longitude rectangle without reprojection.
 }
@@ -272,6 +273,7 @@ async function retrieveDem() {
 }
 el('ee-apply').addEventListener('click',()=>{try{setDrawing(false);applyBounds(readBounds());}catch(e){message(e.message,true);}});
 el('ee-preset').addEventListener('click',()=>{try{setDrawing(false);applyBounds(PRESET);}catch(e){message(e.message,true);}});
+el('ee-aqqala').addEventListener('click',()=>{try{setDrawing(false);applyBounds({west:54.44,south:37.002,east:54.47,north:37.022});}catch(e){message(e.message,true);}});
 el('ee-draw').addEventListener('click',()=>{setDrawing(!drawing);message(drawing?'Click the first corner, then move the pointer to preview the rectangle.':'Rectangle selection stopped.');});
 document.addEventListener('keydown',event=>{if(event.key==='Escape'&&drawing){setDrawing(false);message('Rectangle selection stopped.');}});
 el('ee-connect').addEventListener('click',()=>{
@@ -316,7 +318,18 @@ async function startMap() {
   try {
     await Promise.all([loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','leaflet-sdk'),loadScript('https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js','proj4-sdk')]);
     window.dispatchEvent(new Event('study-map-libraries-ready'));
-    map=window.L.map('ee-map').setView([33.145,47.715],13);
+    map=window.L.map('ee-map',{zoomSnap:0.25});
+    let firstView=true;
+    const resize=new ResizeObserver(()=>{
+      if (!el('ee-map').clientWidth || !el('ee-map').clientHeight) return;
+      map.invalidateSize({pan:false});
+      if(firstView){
+        if (!selected) map.fitBounds([[25,44],[40,63.5]],{padding:[10,10]});
+        else map.fitBounds(rectangle.getBounds(),{padding:[35,35]});
+        firstView=false;
+      }
+    });
+    resize.observe(el('ee-map'));
     window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
     map.on('click',event=>{
       if(!drawing||busy)return;
@@ -325,7 +338,8 @@ async function startMap() {
       setDrawing(false);
     });
     map.on('mousemove',event=>updateDrawingPreview(event.latlng));
-    applyBounds(PRESET);
+    el('ee-area').textContent='Choose an example or draw a study area (up to 25 km²).';
+    if (!el('ee-message').classList.contains('error')) message('Zoom in to draw a rectangle, choose an example, or enter coordinates.');
   }catch(error){message(error.message,true);el('ee-state').textContent='Map unavailable';}
 }
 loadScript('https://accounts.google.com/gsi/client','google-identity-sdk').catch(error=>message('Google sign-in could not load. Check your connection and reload.',true));
@@ -613,6 +627,7 @@ function hydroWorkerMain(computeHydrology, computeTerrain) {
       const result=computeHydrology({values,width,height,dx:resolution[0],dy:Math.abs(resolution[1]),nodata},computeTerrain);
       const products=[];const transfer=[];
       const units={dem_filled:'metres',flow_direction:'D8 code (0 = outlet)',flowacc:'contributing cells, including self',logflowacc:'ln(1 + contributing cells)',twi:'count-based index (desktop formula)'};
+      const d8=[[142,142,142],[215,48,39],[252,141,89],[254,224,144],[145,207,96],[26,152,80],[50,136,189],[81,73,164],[179,88,165]];
       for(const [name,layer] of Object.entries(result.layers)) {
         self.postMessage({type:'progress',message:'Preparing '+name+' GeoTIFF…'});
         let min=Infinity,max=-Infinity,sum=0,count=0;
@@ -621,7 +636,8 @@ function hydroWorkerMain(computeHydrology, computeTerrain) {
         for(let i=0;i<layer.length;i++) {
           const v=layer[i];if(v===result.nodata||!Number.isFinite(v))continue;
           const f=max===min?.5:(name==='flowacc'?Math.log1p(v-min)/Math.log1p(max-min):(v-min)/(max-min));
-          preview.set([Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f),255],i*4);
+          const rgb=name==='flow_direction'?d8[v===0?0:1+Math.log2(v)]:[Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f)];
+          preview.set([...rgb,255],i*4);
         }
         const output=writeFloatTIFF(layer,width,height,resolution[0],Math.abs(resolution[1]),origin,epsg);
         products.push({name,tiff:output,preview:preview.buffer,summary:{min,max,mean:sum/count,validCells:count,unit:units[name]}});
@@ -839,7 +855,7 @@ let linearProducts=[],linearURLs=[],linearVectors=null,linearMapLayer=null,linea
 const linearNames={river_distance:'Distance to rivers',road_distance:'Distance to major roads',river_density:'River density'};
 function linearMessage(text,error=false){el('linear-message').textContent=text;el('linear-message').className=error?'ee-message error':'ee-message';}
 function clearLinearProducts(){mlStackPanel.invalidate();
-  for(const url of linearURLs)URL.revokeObjectURL(url);linearURLs=[];linearProducts=[];linearReport=null;linearVectors=null;el('linear-vectors').disabled=true;if(linearMapLayer&&map)map.removeLayer(linearMapLayer);linearMapLayer=null;
+  for(const url of linearURLs)URL.revokeObjectURL(url);linearURLs=[];linearProducts=[];linearReport=null;linearVectors=null;el('linear-vectors').disabled=true;if(linearMapLayer&&map)map.removeLayer(linearMapLayer);linearMapLayer=null;el('ee-vector-key').hidden=true;
   el('linear-cards').replaceChildren();
   el('linear-report').disabled=true;
 }
@@ -864,7 +880,7 @@ async function runLinear(){
       clearTimeout(timeout);
       if(data.type==='error'){stopLinear();linearMessage(data.message,true);return;}
       linearProducts=data.products;linearReport=data.report;mlStackPanel.invalidate();linearVectors=data.vectors;el('linear-vectors').disabled=false;
-      if(map&&window.L){linearMapLayer=window.L.geoJSON(linearVectors,{style:f=>({color:f.properties.kind==='river'?'#267ab2':'#b16e28',weight:3,opacity:0.9})}).addTo(map);}
+      if(map&&window.L){el('ee-vector-key').hidden=false;linearMapLayer=window.L.geoJSON(linearVectors,{style:f=>({color:f.properties.kind==='river'?'#267ab2':'#b16e28',weight:3,opacity:0.9})}).addTo(map);}
       for(const p of linearProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));linearURLs.push(downloadURL);
         appendRasterCard(el('linear-cards'), p, {
@@ -1115,6 +1131,20 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         self.postMessage({ products, coverage, champion }, [...new Set(transfer)]);
         return;
       }
+      if (data.action === 'previewScenario') {
+        const {width,height,dx} = template;
+        const inputDepth = await readAlignedValues(data.depth,true);
+        let values = inputDepth;
+        if (data.barrierCells.length) {
+          const terrain = await readAlignedValues(data.terrain,true);
+          const riverDistance = data.riverDistance ? await readAlignedValues(data.riverDistance,true) : new Float32Array(width*height).fill(NaN);
+          const cap = inputDepth.reduce((m,v)=>Number.isFinite(v)?Math.max(m,v):m,0)+2;
+          const routed = compareWeaklineClosure({width,height,dx,inputDepth,terrain,riverDistance,cap,barrierCells:data.barrierCells,scenarioOnly:true});
+          values = routed.map((v,i)=>Number.isFinite(v)?v:inputDepth[i]);
+        }
+        self.postMessage({values},[values.buffer]);
+        return;
+      }
       if (data.action === 'weaklineBatch') {
         if (!template || !runWeaklineScenarios) throw Error('Prepare the DEM before running scenarios.');
         const { width, height, dx, dy, origin, epsg } = template;
@@ -1208,7 +1238,7 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         const classColors={10:[0,100,0],20:[255,187,34],30:[255,255,76],40:[240,150,255],50:[250,0,0],60:[180,180,180],70:[240,240,240],80:[0,100,200],90:[0,150,160],95:[0,207,117],100:[250,230,160]};
         for(const [name,layer] of Object.entries(layers)){
           let count=0,min=Infinity,max=-Infinity,sum=0;for(const v of layer)if(v!==-9999){count++;min=Math.min(min,v);max=Math.max(max,v);sum+=v;}
-          const preview=new Uint8ClampedArray(layer.length*4);for(let i=0;i<layer.length;i++){const v=layer[i];if(v===-9999)continue;const f=min===max?.5:(v-min)/(max-min),c=name==='lulc'?classColors[v]:name==='hsg_proxy'?[[0,0,0],[80,180,235],[100,190,100],[235,185,60],[175,85,65]][v]:[Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f)];preview.set([...c,255],i*4);}
+          const preview=new Uint8ClampedArray(layer.length*4);for(let i=0;i<layer.length;i++){const v=layer[i];if(v===-9999)continue;const f=['building_presence_proxy','building_footprint_mask'].includes(name)?v:min===max?.5:(v-min)/(max-min),c=name==='lulc'?classColors[v]:name==='hsg_proxy'?[[0,0,0],[80,180,235],[100,190,100],[235,185,60],[175,85,65]][v]:[Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f)];preview.set([...c,255],i*4);}
           const output=writeFloatTIFF(layer,s.width,s.height,s.dx,s.dy,s.origin,s.epsg);products.push({name,tiff:output,preview:preview.buffer,summary:{validCells:count,noDataCells:layer.length-count,min:count?min:null,max:count?max:null,mean:count?sum/count:null,unit:units[name]}});transfer.push(output,preview.buffer);
         }
         self.postMessage({type:'products',group:data.group,products},transfer);

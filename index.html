@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="workflow.css?v=2"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=single-map"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="workflow.css?v=2"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=map-legends"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .ee-panel{margin-bottom:28px}.ee-panel .eyebrow{margin-bottom:10px}.ee-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,1fr);gap:26px;margin-top:26px}#ee-map{height:330px;background:#eef3ee;border-radius:8px;border:1px solid #d4dfd6;z-index:0}.ee-map-actions{margin-top:12px}.ee-controls h3,.ee-connection h3,.ee-output h3{font-size:15px;margin:0 0 10px}.ee-help{color:#5e7569;font-size:12px;line-height:1.75}.ee-bounds,.ee-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}label{display:flex;flex-direction:column;gap:7px;font-size:11px;font-weight:600;color:#496258;min-width:0}input{width:100%;min-width:0;padding:11px;border:1px solid #c9d8cd;border-radius:6px;background:#fff;color:#22473e;font:inherit;font-size:13px}input:focus-visible{outline:3px solid #c5ddcf;outline-offset:1px}.ee-connection{border-top:1px solid #e0e8e2;margin-top:26px;padding-top:24px}.ee-connection .ee-help{max-width:700px}.ee-fields{margin:16px 0}.ee-setup{margin:0 0 20px;padding:0 0 16px;border-top:0;border-bottom:1px solid #e0e8e2;font-size:12px;line-height:1.9}.ee-setup ol{padding-left:21px;color:#536e5f}.ee-setup code{background:#edf3ec;padding:2px 5px;overflow-wrap:anywhere}.ee-message{font-size:12px;line-height:1.8;background:#eff5ef;padding:13px 16px;border-radius:6px}.ee-message.error{color:#9c3525;background:#fcf0eb}.ee-output{display:grid;grid-template-columns:1fr 220px;gap:24px;border-top:1px solid #e0e8e2;margin-top:22px;padding-top:22px}#ee-preview canvas{width:100%;height:auto;max-height:220px;object-fit:contain;background:#edf3ee;image-rendering:pixelated;border-radius:6px}.engine-panel{margin-top:24px}#ee-state{font-size:12px;border-radius:20px;padding:8px 12px;background:#edf4ef;white-space:nowrap}.leaflet-container{font-family:inherit}.leaflet-control-attribution a{font-size:10px}
 @media(max-width:720px){.ee-layout{grid-template-columns:1fr;gap:20px}.ee-fields{grid-template-columns:1fr}.ee-output{grid-template-columns:1fr}#ee-preview{max-width:260px}#ee-map{height:280px}}
@@ -21,16 +21,26 @@
 [hidden]{display:none!important}.hazard-maps{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:20px}.hazard-maps figure{min-width:0;margin:0;border:1px solid #d8e4dc;border-radius:9px;padding:14px;background:#fbfdfb}.hazard-maps h3{margin:0}.hazard-maps canvas{width:100%;max-height:360px;object-fit:contain;image-rendering:pixelated;background:#f1f5f2}.map-legend{display:flex;flex-wrap:wrap;gap:4px 12px}.map-legend i{display:inline-block;width:10px;height:10px;margin-right:5px;border-radius:2px}.map-legend span{white-space:nowrap}@media(max-width:670px){.hazard-maps{grid-template-columns:1fr}}
 study-area-map{position:relative;display:block;height:218px;width:100%;margin:8px 0;border-radius:6px;overflow:hidden;background:#eef3ee;z-index:0}.study-area-raster{image-rendering:pixelated}
 study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;height:100%;max-height:none;margin:0!important;object-fit:contain}
+.context-help{display:inline-block;position:relative;padding:0;margin:0 .35rem;border:0;vertical-align:middle;font-size:13px}
+.context-help>summary{display:inline-grid;place-items:center;width:22px;height:22px;padding:0;margin:0;border:1px solid #76978b;color:#155d50;background:#f2f8f5;border-radius:50%;font:700 14px Georgia,serif;cursor:pointer;list-style:none}
+.context-help>summary::-webkit-details-marker{display:none}.context-help>summary:focus-visible{outline:3px solid #357fbe}
+.context-help .help-body{padding:12px 15px;border:1px solid #b5cbbf;border-radius:8px;background:#f5faf7;color:#23463c;font:normal 13px/1.55 system-ui;text-align:left}.help-body p{font:inherit;color:inherit;margin:4px 0}
+.context-help[open]{display:block;margin:.45rem 0}.context-help[open]>summary{margin-bottom:.35rem}
+.panel-heading h2,h3:has(+.context-help),h4:has(+.context-help){display:inline-block}
+.range-legend{display:flex;flex-direction:column;gap:3px;color:#294b42;font:600 12px/1.4 system-ui;width:min(100%,330px);margin:8px 0}
+.range-bar{display:block;width:100%;height:14px;border-radius:4px;border:1px solid #7b9087;box-sizing:border-box}
+.range-ticks{display:flex;justify-content:space-between;font-variant-numeric:tabular-nums}.map-legend{font:500 12px/1.55 system-ui;color:#294b42;margin:8px 0;align-items:center}
+.map-legend i,.hazard-swatch{width:14px;height:14px;border:1px solid #64766c;vertical-align:middle}.ee-layout #ee-map{height:clamp(330px,48vh,500px)}
 </style>
 </head>
 <body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE</span></header>
-<main><h1 class="workspace-title">SIAVASH &amp; FARHAD WebGIS</h1><div class="workflow-layout">
+<main><div class="workflow-layout">
 
 <nav class="workflow-tabs" aria-label="WebGIS workflow"><a href="#engine-panel"><span>00</span>Browser checks</a><a href="#ee-title"><span>01</span>Study area &amp; elevation</a><a href="#terrain-title"><span>02</span>Terrain &amp; hydrology</a><a href="#linear-title"><span>03</span>Predictors &amp; exposure</a><a href="#flood-title"><span>04</span>GloFAS reference depths</a><a href="#ml-stack-title"><span>05</span>Flood-depth models</a><a href="#weakline-panel"><span>06</span>Weakline scenarios</a><a href="#hazard-panel"><span>07</span>Flood hazard maps</a><a href="#risk-panel"><span>08</span>Flood risk maps</a></nav>
 <div class="workflow-content">
 <section class="panel engine-panel" id="engine-panel" aria-labelledby="run-title"><div class="panel-heading"><div><p class="eyebrow">STEP 00</p>
-  <h2 id="run-title">Browser checks</h2><p>Python + WebAssembly · separate background worker</p></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
-<p class="notice">Run this check first to verify that your browser can process a small synthetic dataset. The first run downloads the Python runtime and scientific packages from jsDelivr and may take several minutes. No sign-in or data upload is required.</p>
+  <h2 id="run-title">Browser checks</h2><details class="context-help"><summary aria-label="About Browser checks" title="About Browser checks">i</summary><div class="help-body"><p>Python + WebAssembly · separate background worker</p><p class="notice">Run this check first to verify that your browser can process a small synthetic dataset. The first run downloads the Python runtime and scientific packages from jsDelivr and may take several minutes. No sign-in or data upload is required.</p></div></details></div><span id="status" role="status" aria-live="polite">Ready to test</span></div>
+
 <div class="actions"><button id="run">Run browser checks <span aria-hidden="true">↗</span></button><button id="cancel" class="secondary" disabled>Cancel</button><button id="download" class="secondary" disabled>Download report</button><a id="raster" hidden download="synthetic-depth.tif">Download test GeoTIFF</a></div>
 <ol id="checks" aria-label="Compatibility checks"></ol>
 <div class="stats"><div><span id="elapsed">0.0 s</span><small>Elapsed time</small></div><div><span id="heartbeat">0</span><small>Interface heartbeats</small></div><div><span id="grid">64 × 64</span><small>Synthetic raster / 30 m cells</small></div></div>
@@ -40,25 +50,25 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 
 <section class="panel ee-panel" aria-labelledby="ee-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 01</p>
-  <h2 id="ee-title">Study area and elevation</h2><p>SRTM elevation · 30 m UTM grid · maximum 25 km²</p></div><span id="ee-state" role="status" aria-live="polite">Setup required</span></div>
-<div class="ee-layout"><div><div id="ee-map" role="region" aria-label="Study area map"></div><div class="actions ee-map-actions"><button id="ee-draw" class="secondary">Draw rectangle</button><button id="ee-preset" class="secondary">Poldokhtar example</button></div></div>
-<div class="ee-controls"><h3>Study area</h3><p class="ee-help">Draw a rectangle with two map clicks, or enter its coordinates below.</p><div class="ee-bounds">
-<label>West longitude<input id="west" type="number" step="0.000001" value="47.7"></label><label>East longitude<input id="east" type="number" step="0.000001" value="47.73"></label><label>South latitude<input id="south" type="number" step="0.000001" value="33.135"></label><label>North latitude<input id="north" type="number" step="0.000001" value="33.155"></label></div>
+  <h2 id="ee-title">Study area and elevation</h2><details class="context-help"><summary aria-label="About Study area and elevation" title="About Study area and elevation">i</summary><div class="help-body"><p>SRTM elevation · 30 m UTM grid · maximum 25 km²</p><p class="ee-help">This step retrieves elevation only. The exported raster covers the snapped UTM bounding grid. Slope, aspect, curvature and TRASP are available below. Drainage routing and wetness are available below. Hazard mapping uses this same grid.</p></div></details></div><span id="ee-state" role="status" aria-live="polite">Setup required</span></div>
+<div class="ee-layout"><div><div id="ee-map" role="region" aria-label="Study area map"></div><div id="ee-map-key" class="map-legend" hidden><span><i style="background:#197361"></i>Study area</span><span id="ee-vector-key" hidden><i style="background:#267ab2"></i>River &nbsp; <i style="background:#b16e28"></i>Major road</span></div><div class="actions ee-map-actions"><button id="ee-draw" class="secondary">Draw rectangle</button><button id="ee-preset" class="secondary">Poldokhtar example</button><button id="ee-aqqala" class="secondary">Aqqala example</button></div></div>
+<div class="ee-controls"><h3>Study area</h3><details class="context-help"><summary aria-label="About Study area" title="About Study area">i</summary><div class="help-body"><p class="ee-help">Draw a rectangle with two map clicks, or enter its coordinates below.</p></div></details><div class="ee-bounds">
+<label>West longitude<input id="west" type="number" step="0.000001"></label><label>East longitude<input id="east" type="number" step="0.000001"></label><label>South latitude<input id="south" type="number" step="0.000001"></label><label>North latitude<input id="north" type="number" step="0.000001"></label></div>
 <button id="ee-apply" class="secondary">Apply coordinates</button><p id="ee-area" class="ee-help">Loading map and projection…</p></div></div>
-<div class="ee-connection"><div><h3>Connect your Earth Engine account</h3><p class="ee-help">Use an Earth Engine-enabled Cloud project and a Web OAuth client configured for this website. Access tokens stay in browser memory.</p></div><div class="ee-fields"><label>Earth Engine project ID<input id="ee-project" type="text" autocomplete="off" spellcheck="false" placeholder="ee-your-project-id"></label><label>Web OAuth client ID<input id="ee-client" type="text" autocomplete="off" spellcheck="false" placeholder="123456789-….apps.googleusercontent.com"></label></div>
+<div class="ee-connection"><div><h3>Connect your Earth Engine account</h3><details class="context-help"><summary aria-label="About Connect your Earth Engine account" title="About Connect your Earth Engine account">i</summary><div class="help-body"><p class="ee-help">Use an Earth Engine-enabled Cloud project and a Web OAuth client configured for this website. Access tokens stay in browser memory.</p></div></details></div><div class="ee-fields"><label>Earth Engine project ID<input id="ee-project" type="text" autocomplete="off" spellcheck="false" placeholder="ee-your-project-id"></label><label>Web OAuth client ID<input id="ee-client" type="text" autocomplete="off" spellcheck="false" placeholder="123456789-….apps.googleusercontent.com"></label></div>
 <label class="ee-remember"><input id="ee-remember" type="checkbox" autocomplete="off" aria-describedby="ee-remember-help">Remember setup on this browser</label>
-<p id="ee-remember-help" class="ee-help">Save the project ID and OAuth client ID on this browser. Reconnect with Google when you return.</p>
+<details class="context-help"><summary aria-label="About Remember setup" title="About Remember setup">i</summary><div class="help-body"><p id="ee-remember-help" class="ee-help">Save the project ID and OAuth client ID on this browser. Reconnect with Google when you return.</p></div></details>
 <p id="ee-remember-status" class="ee-help ee-remember-status" role="status"></p></div>
 <details class="ee-setup"><summary>First-time Google setup</summary><ol><li>Use your existing Earth Engine-enabled Google Cloud project.</li><li>Create an OAuth client of type <strong>Web application</strong>. Add <code>https://afshinfs.github.io</code> as an authorised JavaScript origin (without the repository path).</li><li>Configure the consent screen for Earth Engine read-only access. If the app is in testing, add your own Google account as a test user.</li><li>Paste the public client ID and project ID above, then connect. No client secret or service-account key is needed.</li></ol><p>For local development, add the exact localhost origin you use as well.</p><a href="https://developers.google.com/identity/oauth2/web/guides/get-google-api-clientid" target="_blank" rel="noopener">Google’s client setup guide</a></details>
 <div class="actions"><button id="ee-connect">Connect Google account</button><button id="ee-disconnect" class="secondary" disabled>Disconnect &amp; forget setup</button><button id="ee-fetch" disabled>Retrieve SRTM DEM</button><button id="ee-cancel" class="secondary" disabled>Stop request</button></div>
 <p id="ee-message" class="ee-message" role="status" aria-live="polite">Loading connection controls…</p>
 <div class="ee-output"><div><h3>Elevation result</h3><p id="ee-result" class="ee-help">No Earth Engine data retrieved yet.</p><div class="actions"><a id="ee-dem-download" hidden download="siavash-farhad-srtm-30m.tif">Download elevation GeoTIFF</a><button id="ee-report-download" class="secondary" disabled>Download DEM report</button></div></div><div id="ee-preview" aria-label="Elevation raster preview"></div></div>
-<p class="ee-help">This step retrieves elevation only. The exported raster covers the snapped UTM bounding grid. Slope, aspect, curvature and TRASP are available below. Drainage routing and wetness are available below. Hazard mapping uses this same grid.</p>
+
 </section>
 
 <section class="panel terrain-panel" aria-labelledby="terrain-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 02</p>
-  <h2 id="terrain-title">Terrain predictors</h2><p>Slope · aspect · planform curvature · TRASP</p></div></div>
+  <h2 id="terrain-title">Terrain predictors</h2><details class="context-help"><summary aria-label="About Terrain predictors" title="About Terrain predictors">i</summary><div class="help-body"><p>Slope · aspect · planform curvature · TRASP</p><p class="ee-help">Current inputs: single-band, single-image, north-up WGS84 UTM GeoTIFFs with square metre pixels, up to 512 × 512 cells and 8 MB. Hydrology and drainage includes depression filling, flow accumulation and TWI.</p></div></details></div></div>
 <p id="terrain-source" class="ee-help">Retrieve a DEM under Study area or open a downloaded DEM here.</p>
 <div class="terrain-actions"><button id="terrain-run" disabled>Calculate terrain</button><button id="terrain-cancel" class="secondary" disabled>Cancel terrain</button><label class="terrain-file-label">Or open an existing DEM<input id="terrain-file" type="file" accept=".tif,.tiff,image/tiff"></label></div>
 <p id="terrain-message" class="ee-message" role="status" aria-live="polite">Terrain processing runs locally in your browser.</p>
@@ -68,12 +78,12 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
   <div class="terrain-actions"><button id="terrain-report" class="secondary" disabled>Download terrain report</button></div>
 </section>
 <details><summary>Methods and validation</summary><p class="ee-help">Horn (1981) slope/aspect and Zevenbergen–Thorne (1987) planform curvature, with the original curvature scale and TRASP formula. Compared with a pinned RichDEM native reference on six cases, including the downloaded Poldokhtar DEM. NoData footprint and grid alignment are preserved.</p><p class="ee-help">Edges and missing neighbours use the centre elevation, as in the original implementation. Aspect on flat cells uses the reference convention of 270°; flat terrain has no physical downslope direction. Allow a buffer around your final analysis area to reduce edge effects.</p></details>
-<p class="ee-help">Current inputs: single-band, single-image, north-up WGS84 UTM GeoTIFFs with square metre pixels, up to 512 × 512 cells and 8 MB. Hydrology and drainage includes depression filling, flow accumulation and TWI.</p>
+
 </section>
 
 <section class="panel terrain-panel" aria-labelledby="hydro-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 02</p>
-  <h2 id="hydro-title">Hydrology and drainage</h2><p>Filled DEM · D8 direction · flow accumulation · TWI</p></div></div>
+  <h2 id="hydro-title">Hydrology and drainage</h2><details class="context-help"><summary aria-label="About Hydrology and drainage" title="About Hydrology and drainage">i</summary><div class="help-body"><p>Filled DEM · D8 direction · flow accumulation · TWI</p></div></details></div></div>
 <p id="hydro-source" class="ee-help">Retrieve a DEM under Study area or open a downloaded DEM here.</p>
 <div class="terrain-actions"><button id="hydro-run" disabled>Calculate hydrology</button><button id="hydro-cancel" class="secondary" disabled>Cancel hydrology</button><label class="terrain-file-label">Or open a DEM for hydrology<input id="hydro-file" type="file" accept=".tif,.tiff,image/tiff"></label></div>
 <p id="hydro-message" class="ee-message" role="status" aria-live="polite">Hydrology processing runs locally in your browser.</p>
@@ -87,10 +97,10 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 
 <section class="panel terrain-panel" aria-labelledby="linear-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 03</p>
-  <h2 id="linear-title">Rivers and roads</h2><p>Distance to rivers · distance to major roads · river density</p></div></div>
+  <h2 id="linear-title">Rivers and roads</h2><details class="context-help"><summary aria-label="About Rivers and roads" title="About Rivers and roads">i</summary><div class="help-body"><p>Distance to rivers · distance to major roads · river density</p><p class="ee-help">Live requests send the DEM search bounds to the selected public Overpass server. Automatic mode tries FOSSGIS first and switches to Private.coffee on a temporary server or connection error. It searches approximately 1 km beyond the DEM. Calculations run in your browser.</p></div></details></div></div>
 <p id="linear-source" class="ee-help">Retrieve a DEM under Study area or open a downloaded DEM here.</p>
 <div class="terrain-actions"><button id="linear-run" disabled>Calculate roads and rivers</button><button id="linear-cancel" class="secondary" disabled>Cancel roads and rivers</button><label class="terrain-file-label">Or open a DEM for roads and rivers<input id="linear-file" type="file" accept=".tif,.tiff,image/tiff"></label></div>
-<p class="ee-help">Live requests send the DEM search bounds to the selected public Overpass server. Automatic mode tries FOSSGIS first and switches to Private.coffee on a temporary server or connection error. It searches approximately 1 km beyond the DEM. Calculations run in your browser.</p>
+
 <div class="terrain-actions"><label class="terrain-file-label">Optional saved OSM JSON or GeoJSON<input id="linear-osm-file" type="file" accept=".json,.geojson,application/json,application/geo+json"></label><label>OSM server<select id="linear-server"><option value="auto">Automatic · FOSSGIS then Private.coffee</option><option value="privatecoffee">Private.coffee</option><option value="fosssgis">FOSSGIS / overpass-api.de</option></select></label><button id="linear-live" class="secondary">Use live OSM</button></div>
 <p id="linear-osm-source" class="ee-help">OSM source: live Overpass API</p>
 <p id="linear-message" class="ee-message" role="status" aria-live="polite">OpenStreetMap data will be retrieved when you calculate.</p>
@@ -105,17 +115,17 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 
 <section class="panel terrain-panel" aria-labelledby="sat-title">
 <div class="panel-heading"><div><p class="eyebrow">STEP 03</p>
-  <h2 id="sat-title">Environmental predictors</h2><p>Land cover · Manning n · NDVI · rainfall · precipitation anomaly · soil proxy · MERIT elevation</p></div></div>
+  <h2 id="sat-title">Environmental predictors</h2><details class="context-help"><summary aria-label="About Environmental predictors" title="About Environmental predictors">i</summary><div class="help-body"><p>Land cover · Manning n · NDVI · rainfall · precipitation anomaly · soil proxy · MERIT elevation</p><p class="ee-help">Date ranges are end-exclusive and limited to 366 days. The anomaly compares the target accumulation with the same ending calendar month across at least 30 complete baseline years. It uses the desktop z-score formula, rather than a gamma-fitted SPI. Its baseline calculation can take longer; deselect unneeded datasets for a smaller request.</p></div></details></div></div>
 <p id="sat-auth" class="ee-help">Connect Google under Study area, then retrieve or open a DEM.</p><p id="sat-source" class="ee-help">Retrieve a DEM under Study area or open a downloaded DEM here.</p>
 <div id="sat-options" class="dataset-grid">
-  <fieldset class="dataset-group"><legend>Land cover and roughness</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="worldcover" checked>WorldCover + Manning n</label></div><div class="dataset-fields"><label>WorldCover map year<select id="sat-worldcover"><option value="2021">2021 · v200</option><option value="2020">2020 · v100</option></select></label></div></fieldset>
-  <fieldset class="dataset-group"><legend>Vegetation</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="ndvi" checked>Sentinel-2 NDVI</label></div><div class="dataset-fields"><label>NDVI start date<input id="sat-ndvi-start" type="date" value="2020-01-01"></label><label>NDVI end date (exclusive)<input id="sat-ndvi-end" type="date" value="2021-01-01"></label></div></fieldset>
-  <fieldset class="dataset-group"><legend>Rainfall</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="rainfall" checked>CHIRPS rainfall</label></div><div class="dataset-fields"><label>Rainfall start date<input id="sat-rain-start" type="date" value="2020-01-01"></label><label>Rainfall end date (exclusive)<input id="sat-rain-end" type="date" value="2021-01-01"></label></div></fieldset>
-  <fieldset class="dataset-group"><legend>Precipitation anomaly</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="spi" checked>Precipitation anomaly (SPI proxy)</label></div><div class="dataset-fields"><label>Baseline first year<input id="sat-base-start" type="number" min="1981" value="1981"></label><label>Baseline last year (inclusive)<input id="sat-base-end" type="number" value="2024"></label><label>Target ending month<input id="sat-target" type="month" value="2020-12"></label><label>Accumulation window<select id="sat-months"><option value="1">1 month</option><option value="3" selected>3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label></div></fieldset>
-  <fieldset class="dataset-group"><legend>Soils</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="soil" checked>Soil-group proxy</label></div></fieldset>
-  <fieldset class="dataset-group"><legend>MERIT elevation</legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="merit" checked>MERIT adjusted elevation (hnd)</label></div></fieldset>
+  <fieldset class="dataset-group"><legend>Land cover and roughness <details class="context-help"><summary aria-label="About Land cover and roughness" title="About Land cover and roughness">i</summary><div class="help-body">WorldCover supplies the land-cover class used to assign Manning roughness.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="worldcover" checked>WorldCover + Manning n</label></div><div class="dataset-fields"><label>WorldCover map year<select id="sat-worldcover"><option value="2021">2021 · v200</option><option value="2020">2020 · v100</option></select></label></div></fieldset>
+  <fieldset class="dataset-group"><legend>Vegetation <details class="context-help"><summary aria-label="About Vegetation" title="About Vegetation">i</summary><div class="help-body">Mean Sentinel-2 NDVI over the selected dates. The end date is exclusive.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="ndvi" checked>Sentinel-2 NDVI</label></div><div class="dataset-fields"><label>NDVI start date<input id="sat-ndvi-start" type="date" value="2020-01-01"></label><label>NDVI end date (exclusive)<input id="sat-ndvi-end" type="date" value="2021-01-01"></label></div></fieldset>
+  <fieldset class="dataset-group"><legend>Rainfall <details class="context-help"><summary aria-label="About Rainfall" title="About Rainfall">i</summary><div class="help-body">Accumulated CHIRPS rainfall over the selected dates, in millimetres.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="rainfall" checked>CHIRPS rainfall</label></div><div class="dataset-fields"><label>Rainfall start date<input id="sat-rain-start" type="date" value="2020-01-01"></label><label>Rainfall end date (exclusive)<input id="sat-rain-end" type="date" value="2021-01-01"></label></div></fieldset>
+  <fieldset class="dataset-group"><legend>Precipitation anomaly <details class="context-help"><summary aria-label="About Precipitation anomaly" title="About Precipitation anomaly">i</summary><div class="help-body">Compare the target accumulation with the same ending month in at least 30 complete baseline years.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="spi" checked>Precipitation anomaly (SPI proxy)</label></div><div class="dataset-fields"><label>Baseline first year<input id="sat-base-start" type="number" min="1981" value="1981"></label><label>Baseline last year (inclusive)<input id="sat-base-end" type="number" value="2024"></label><label>Target ending month<input id="sat-target" type="month" value="2020-12"></label><label>Accumulation window<select id="sat-months"><option value="1">1 month</option><option value="3" selected>3 months</option><option value="6">6 months</option><option value="12">12 months</option></select></label></div></fieldset>
+  <fieldset class="dataset-group"><legend>Soils <details class="context-help"><summary aria-label="About Soils" title="About Soils">i</summary><div class="help-body">The soil-group proxy maps surface texture to groups A–D.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="soil" checked>Soil-group proxy</label></div></fieldset>
+  <fieldset class="dataset-group"><legend>MERIT elevation <details class="context-help"><summary aria-label="About MERIT elevation" title="About MERIT elevation">i</summary><div class="help-body">MERIT hnd is adjusted elevation above the EGM96 geoid.</div></details></legend><div class="sat-checks"><label><input type="checkbox" data-sat-group="merit" checked>MERIT adjusted elevation (hnd)</label></div></fieldset>
 </div>
-<p class="ee-help">Date ranges are end-exclusive and limited to 366 days. The anomaly compares the target accumulation with the same ending calendar month across at least 30 complete baseline years. It uses the desktop z-score formula, rather than a gamma-fitted SPI. Its baseline calculation can take longer; deselect unneeded datasets for a smaller request.</p>
+
 <div class="terrain-actions"><button id="sat-run" disabled>Retrieve satellite predictors</button><button id="sat-cancel" class="secondary" disabled>Cancel satellite retrieval</button><label class="terrain-file-label">Or open a DEM for satellite predictors<input id="sat-file" type="file" accept=".tif,.tiff,image/tiff"></label></div>
 <p id="sat-message" class="ee-message" role="status" aria-live="polite">Select the DEM grid and connect Earth Engine under Study area.</p>
 <section class="layer-region" aria-labelledby="sat-layers-title">
@@ -132,7 +142,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 </section>
 <section class="panel terrain-panel" aria-labelledby="exp-title">
   <div class="panel-heading"><div><p class="eyebrow">STEP 03</p>
-  <h2 id="exp-title">Exposure layers</h2></div></div>
+  <h2 id="exp-title">Exposure layers</h2><details class="context-help"><summary aria-label="About exposure layers">i</summary><div class="help-body">Choose the exposure layers to align to the DEM. Step 08 uses population density or building presence for the exposure index.</div></details></div></div>
   <p id="exp-auth" class="ee-help">Connect your Google account under Study area to retrieve exposure layers.</p>
   <p id="exp-source" class="ee-help">Retrieve a DEM under Study area or open one here.</p>
   <fieldset id="exp-options" class="exp-options">
@@ -175,7 +185,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 
 <section class="panel terrain-panel" aria-labelledby="flood-title">
   <div class="panel-heading"><div><p class="eyebrow">STEP 04</p>
-  <h2 id="flood-title">GloFAS reference depths</h2><p>JRC GloFAS v2.1 · river flood depth in metres · 90 m source grid</p></div></div>
+  <h2 id="flood-title">GloFAS reference depths</h2><details class="context-help"><summary aria-label="About GloFAS reference depths" title="About GloFAS reference depths">i</summary><div class="help-body"><p>JRC GloFAS v2.1 · river flood depth in metres · 90 m source grid</p></div></details></div></div>
   <p class="ee-help" id="flood-auth"></p>
   <p class="ee-help" id="flood-source">Retrieve a DEM under Study area or open one here.</p>
   <fieldset id="flood-options" class="exp-options">
@@ -196,7 +206,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
     <div class="sat-checks">
       <label><input type="checkbox" id="flood-gumbel" aria-describedby="flood-gumbel-help">Fit 25-, 30-, 300-, and 1,000-year depths</label>
     </div>
-    <p id="flood-gumbel-help" class="ee-help">The fit retrieves all seven source periods and uses only cells with a valid depth in every period. Select which published layers to export above.</p>
+    <details class="context-help"><summary aria-label="About Gumbel fit" title="About Gumbel fit">i</summary><div class="help-body"><p id="flood-gumbel-help" class="ee-help">The fit retrieves all seven source periods and uses only cells with a valid depth in every period. Select which published layers to export above.</p></div></details>
   </fieldset>
   <div class="terrain-actions">
     <button id="flood-run" disabled>Retrieve reference depths</button>
@@ -218,9 +228,9 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 <section class="panel terrain-panel" aria-labelledby="ml-stack-title">
   <div class="panel-heading">
     <div><p class="eyebrow">STEP 05</p>
-  <h2 id="ml-stack-title">Flood-depth model inputs</h2></div>
+  <h2 id="ml-stack-title">Flood-depth model inputs</h2><details class="context-help"><summary aria-label="About Flood-depth model inputs" title="About Flood-depth model inputs">i</summary><div class="help-body"><p class="ee-help">Check the terrain, hydrology, road and river, and environmental predictors against the DEM grid. The depth targets are 30, 100, 300, and 1,000 years.</p><p class="ee-help">The check uses WebGIS outputs from this session. Local files with their original export names override matching layers. All files are read in your browser. Align mismatched files to the DEM before checking again.</p><p class="ee-help">Usable cells have a valid DEM, all required predictors, and a valid depth target for that period. Spatial-block counts show how many 40 × 40 cell blocks contain usable cells.</p></div></details></div>
   </div>
-  <p class="ee-help">Check the terrain, hydrology, road and river, and environmental predictors against the DEM grid. The depth targets are 30, 100, 300, and 1,000 years.</p>
+  
   <p id="ml-stack-source" class="ee-help"></p>
   <div class="terrain-actions">
     <button id="ml-stack-run" disabled>Check raster stack</button>
@@ -229,7 +239,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
     <label class="terrain-file-label">Optional aligned GeoTIFFs<input id="ml-stack-layers" type="file" accept=".tif,.tiff,image/tiff" multiple></label>
     <button id="ml-stack-clear" class="secondary" disabled>Clear local selections</button>
   </div>
-  <p class="ee-help">The check uses WebGIS outputs from this session. Local files with their original export names override matching layers. All files are read in your browser. Align mismatched files to the DEM before checking again.</p>
+  
   <p id="ml-stack-status" class="ee-message" role="status" aria-live="polite"></p>
   <div id="ml-stack-results" hidden>
     <p id="ml-stack-summary" class="ee-help"></p>
@@ -244,12 +254,12 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
         <tbody id="ml-stack-layer-results"></tbody>
       </table></div>
     </details>
-    <p class="ee-help">Usable cells have a valid DEM, all required predictors, and a valid depth target for that period. Spatial-block counts show how many 40 × 40 cell blocks contain usable cells.</p>
+    
     <button id="ml-stack-report" class="secondary" disabled>Download raster-stack report</button>
     <section class="ee-connection" aria-labelledby="ml-stack-training-title">
-      <h3 id="ml-stack-training-title">Train XGBoost depth models</h3>
-      <p class="ee-help">Training runs in your browser. Cross-validation holds out entire 40 × 40 cell blocks. Scores compare held-out cells with the GloFAS-derived reference depths.</p>
-      <p class="ee-help">The browser uses fixed model settings and all 17 checked predictors. Depth exports retain values below 0.05 m. The wet-cell count uses the 0.05 m threshold.</p>
+      <h3 id="ml-stack-training-title">Train XGBoost depth models</h3><details class="context-help"><summary aria-label="About Train XGBoost depth models" title="About Train XGBoost depth models">i</summary><div class="help-body"><p class="ee-help">Training runs in your browser. Cross-validation holds out entire 40 × 40 cell blocks. Scores compare held-out cells with the GloFAS-derived reference depths.</p><p class="ee-help">The browser uses fixed model settings and all 17 checked predictors. Depth exports retain values below 0.05 m. The wet-cell count uses the 0.05 m threshold.</p></div></details>
+      
+      
       <div class="terrain-actions">
         <label>Spatial cross-validation folds
           <select id="ml-stack-folds" aria-describedby="ml-stack-fold-requirement">
@@ -276,9 +286,9 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 <section class="panel terrain-panel" id="weakline-panel" aria-labelledby="weakline-title">
   <div class="panel-heading"><div>
   <p class="eyebrow">STEP 06</p>
-  <h2 id="weakline-title">Weakline scenarios</h2>
+  <h2 id="weakline-title">Weakline scenarios</h2><details class="context-help"><summary aria-label="About Weakline scenarios" title="About Weakline scenarios">i</summary><div class="help-body"><p class="ee-help">Screen the flood depths along a river corridor boundary. Candidates are grouped along the DEM cell edges and assigned to the first return period that exceeds the depth threshold.</p><p class="ee-help">The 25-year footprint uses cells deeper than its threshold. An aligned local GeoTIFF overrides the fitted 25-year depth.</p></div></details>
   </div></div>
-  <p class="ee-help">Screen the flood depths along a river corridor boundary. Candidates are grouped along the DEM cell edges and assigned to the first return period that exceeds the depth threshold.</p>
+  
   <div class="terrain-actions">
     <label>Depth source
       <select id="weakline-source">
@@ -298,7 +308,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
     <label>Minimum candidate length (m)<input id="weakline-minimum" type="number" value="400" min="0" step="any" required></label>
     <label class="terrain-file-label">Optional 25-year depth override<input id="weakline-depth25" type="file" accept=".tif,.tiff,image/tiff" disabled></label>
   </div>
-  <p class="ee-help">The 25-year footprint uses cells deeper than its threshold. An aligned local GeoTIFF overrides the fitted 25-year depth.</p>
+  
   <p id="weakline-ready" class="ee-help" aria-live="polite"></p>
   <div class="terrain-actions">
     <button id="weakline-run" disabled>Map candidate weaklines</button>
@@ -307,31 +317,35 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
   <p id="weakline-status" class="ee-message" role="status" aria-live="polite" hidden></p>
   <div id="weakline-results" hidden>
     <p id="weakline-counts" class="ee-help"></p>
-    <div id="weakline-map" role="region" aria-label="Candidate weakline map"></div>
+    <h3>Candidate weaklines</h3><div id="weakline-map" role="region" aria-label="Candidate weakline map"></div>
     <div class="map-legend ee-help" aria-label="Weakline first-screened return period">
-      <span><i style="background:#a52935"></i>30 years</span><span><i style="background:#a65c00"></i>100 years</span><span><i style="background:#166879"></i>300 years</span><span><i style="background:#61439a"></i>1,000 years</span>
+      <span><i style="background:#a52935"></i>30 years</span><span><i style="background:#a65c00"></i>100 years</span><span><i style="background:#166879"></i>300 years</span><span><i style="background:#61439a"></i>1,000 years</span><span><i style="background:#112127"></i>Selected line</span>
     </div>
     <div class="terrain-downloads">
       <button id="weakline-geojson" class="secondary">Download candidate GeoJSON</button>
       <button id="weakline-report" class="secondary">Download screening report</button>
     </div>
     <div id="weakline-scenario" class="ee-connection" hidden>
-      <h3>Test weakline scenarios by return period</h3>
-      <p class="ee-help">The open state is the baseline. Each scenario closes a subset of the eligible weaklines and leaves the other lines open. Scenarios with the same raster barrier are routed once.</p>
+      <h3>Test weakline scenarios by return period</h3><details class="context-help"><summary aria-label="About Test weakline scenarios by return period" title="About Test weakline scenarios by return period">i</summary><div class="help-body"><p class="ee-help">The open state is the baseline. Each scenario closes a subset of the eligible weaklines and leaves the other lines open. Scenarios with the same raster barrier are routed once.</p><p class="ee-help">The bounded search tests each single closure, cumulative closures in candidate order, and up to 200 distinct mixed pairs or triples per return period.</p></div></details>
+      
       <div class="terrain-actions">
         <label>Scenario search<select id="weakline-search"><option value="all">All open and closed combinations</option><option value="desktop">Desktop-style bounded search</option></select></label>
         <button id="weakline-batch" disabled>Run scenario search</button>
       </div>
       <p id="weakline-search-size" class="ee-help"></p>
-      <p class="ee-help">The bounded search tests each single closure, cumulative closures in candidate order, and up to 200 distinct mixed pairs or triples per return period.</p>
+      
       <div id="weakline-batch-results" hidden>
         <h4>Highest-exposure closure for each return period</h4>
         <p class="ee-help" id="weakline-batch-metric"></p>
         <div class="stack-table"><table><thead><tr><th>Years</th><th>Eligible lines</th><th>Possible closures</th><th>Routed masks</th><th>Winning lines</th><th>Score</th></tr></thead><tbody id="weakline-batch-rows"></tbody></table></div>
+        <h4>Inspect a tested scenario</h4>
+        <div class="terrain-actions"><label>Return period<select id="weakline-view-period"><option value="30">30 years</option><option value="100">100 years</option><option value="300">300 years</option><option value="1000">1,000 years</option></select></label>
+        <label>Weakline state<select id="weakline-view-scenario"></select></label><button id="weakline-view-run" class="secondary">Show depth map</button></div>
+        <div id="weakline-view-map"></div>
         <div class="terrain-actions"><button id="weakline-batch-report" class="secondary">Download scenario report</button> <a href="#hazard-panel">Open flood hazard maps</a></div>
       </div>
-      <h3 class="ee-connection">Compare a custom closure</h3>
-      <p class="ee-help">Both runs use a priority-flood calculation on water-surface elevation. The closure raises the grid cells along the selected weaklines. Results are for screening and require hydraulic validation before use in design.</p>
+      <h3 class="ee-connection">Compare a custom closure</h3><details class="context-help"><summary aria-label="About Compare a custom closure" title="About Compare a custom closure">i</summary><div class="help-body"><p class="ee-help">Both runs use a priority-flood calculation on water-surface elevation. The closure raises the grid cells along the selected weaklines. Results are for screening and require hydraulic validation before use in design.</p></div></details>
+      
       <div class="terrain-actions">
         <label>Candidate
           <select id="weakline-candidate"></select>
@@ -363,9 +377,9 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 <section class="panel terrain-panel" id="hazard-panel" aria-labelledby="hazard-title">
   <div class="panel-heading"><div>
   <p class="eyebrow">STEP 07</p>
-  <h2 id="hazard-title">Flood hazard maps</h2>
+  <h2 id="hazard-title">Flood hazard maps</h2><details class="context-help"><summary aria-label="About Flood hazard maps" title="About Flood hazard maps">i</summary><div class="help-body"><p class="ee-help">Estimate Manning velocity and depth × velocity, then map FOEN danger and ADR7 classes for the 30-, 100-, 300-, and 1,000-year events. Velocity is a terrain-based screening estimate. FOEN combines the first classified return period with low, middle or high intensity. A first exceedance at 1,000 years is residual. ADR7 assigns H1–H6 using depth, velocity and their product. The FOEN matrix GeoTIFF preserves the original frequency–intensity codes.</p></div></details>
   </div></div>
-  <p class="ee-help">Estimate Manning velocity and depth × velocity, then map FOEN danger and ADR7 classes for the 30-, 100-, 300-, and 1,000-year events. Velocity is a terrain-based screening estimate.</p>
+  
   <div class="terrain-actions">
     <label>Hazard depth source
       <select id="hazard-source"><option value="reference">GloFAS reference depths</option><option value="trained">XGBoost predictions from this session</option></select>
@@ -393,7 +407,7 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
     <div class="hazard-maps">
       <figure><figcaption><h3>FOEN danger</h3><p id="hazard-champion-note" class="ee-help"></p></figcaption>
         <canvas id="hazard-foen-map" role="img"></canvas><div id="hazard-foen-legend" class="map-legend ee-help"></div></figure>
-      <figure><figcaption><h3>ADR7 maximum class</h3><p class="ee-help">Highest classified hazard across the four return periods.</p></figcaption>
+      <figure><figcaption><h3>ADR7 maximum class</h3><details class="context-help"><summary aria-label="About ADR7 maximum class" title="About ADR7 maximum class">i</summary><div class="help-body"><p class="ee-help">Highest classified hazard across the four return periods.</p></div></details></figcaption>
         <canvas id="hazard-adr-map" role="img"></canvas><div id="hazard-adr-legend" class="map-legend ee-help"></div></figure>
     </div>
     <div class="terrain-results">
@@ -410,14 +424,15 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 </section>
 
 <section class="panel terrain-panel" id="risk-panel" aria-labelledby="risk-title">
-  <div class="panel-heading"><div><p class="eyebrow">STEP 08</p><h2 id="risk-title">Flood risk maps</h2></div></div>
-  <p>Combine the final FOEN danger matrix from the champion basis and the ADR7 first-flood hazard with vulnerability and exposure on the study-area grid.</p>
+  <div class="panel-heading"><div><p class="eyebrow">STEP 08</p><h2 id="risk-title">Flood risk maps</h2><details class="context-help"><summary aria-label="About Flood risk maps" title="About Flood risk maps">i</summary><div class="help-body"><p>Combine the final FOEN danger matrix from the champion basis and the ADR7 first-flood hazard with vulnerability and exposure on the study-area grid.</p><p class="ee-help">Use <a href="#exp-title">Step 03 exposure layers</a> for population and buildings. Select the depth source and scenario in <a href="#hazard-panel">Step 07 flood hazard maps</a>.</p></div></details></div></div>
+  
   <div class="ee-fields"><label>Risk calculation<select id="risk-method"><option value="HEV">Hazard × exposure × vulnerability</option><option value="HV">Hazard × vulnerability</option></select></label>
   <label>Risk class boundaries<select id="risk-bins"><option value="quantile">Quantiles within this study area</option><option value="equal">Equal intervals from 0 to 1</option></select></label></div>
-  <p class="ee-help">Use <a href="#exp-title">Step 03 exposure layers</a> for population and buildings. Select the depth source and scenario in <a href="#hazard-panel">Step 07 flood hazard maps</a>.</p>
+  
   <p id="risk-ready" role="status"></p><div class="terrain-actions"><button id="risk-run" disabled>Calculate flood risk</button><button id="risk-cancel" class="secondary" disabled>Cancel</button></div>
   <p id="risk-status" role="status"></p><a id="risk-report" download="farhad-risk-report.json" hidden>Download risk report</a>
-  <div id="risk-maps" class="hazard-maps"></div></section>
+  <div id="risk-maps" class="hazard-maps"></div>
+  <details id="risk-optional" hidden><summary>Show risk indices, vulnerability and exposure</summary><div id="risk-other-maps" class="hazard-maps"></div></details></section>
   <nav class="step-pager" aria-label="Adjacent workflow steps"><a id="step-prev"></a><a id="step-next"></a></nav>
 </div></div></main><script type="module">
 const groups = [

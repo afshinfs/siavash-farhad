@@ -1,4 +1,4 @@
-import { appendRasterCard } from './raster-cards.mjs?v=single-map';
+import { appendRasterCard } from './raster-cards.mjs?v=map-legends';
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
 const gumbelPeriods = [25, 30, 300, 1000];

@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=single-map';
+import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=map-legends';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],
@@ -102,7 +102,7 @@ export function createRiskPanel({element, read, rasterWorker, callWorker}) {
   function reset() {
     job?.controller.abort(); job?.worker?.terminate(); job=null;
     urls.forEach(URL.revokeObjectURL); urls=[];
-    el('maps').replaceChildren(); el('report').hidden=true; el('status').textContent='';
+    el('maps').replaceChildren(); el('other-maps').replaceChildren(); el('optional').open=false; el('optional').hidden=true; el('report').hidden=true; el('status').textContent='';
     refresh();
   }
   function link(data,type) { const url=URL.createObjectURL(new Blob([data],{type})); urls.push(url); return url; }
@@ -123,13 +123,13 @@ export function createRiskPanel({element, read, rasterWorker, callWorker}) {
       if (!label) return;
       const span=document.createElement('span'), swatch=document.createElement('i');
       swatch.style.backgroundColor=colors[i]; span.append(swatch,label); legend.append(span);
-    }); else legend.textContent='Light to dark · 0 to 1';
+    }); else legend.append(rangeLegend(0,1,'Index','#e7f4ed','#246b5c'));
     const caption=document.createElement('p'); caption.className='ee-help';
     const stats=report.frameworks[name.split('_')[0]];
     caption.textContent=stats ? stats.positiveCells.toLocaleString()+' positive risk cells · '+stats.applied+' classes' : 'Scaled within the study area';
     const a=document.createElement('a'); a.href=link(product.tiff,'image/tiff'); a.download='farhad_'+report.mode+'_'+report.method+'_'+name+'.tif';
     a.textContent='Download GeoTIFF'; a.setAttribute('aria-label','Download '+title.textContent+' GeoTIFF');
-    figure.append(title,canvas,legend,caption,a); showStudyArea(figure,grid); el('maps').append(figure);
+    figure.append(title,canvas,legend,caption,a); showStudyArea(figure,grid); (name==='foen_class'||name==='adr7_class'?el('maps'):el('other-maps')).append(figure);
   }
   el('run').onclick=async()=>{
     if(el('run').disabled) return;
@@ -152,6 +152,7 @@ export function createRiskPanel({element, read, rasterWorker, callWorker}) {
         buildingSource,scenarioSelection:hazard.report.scenarios,minimumPatchCells:4,zeroThreshold:1e-6,scalingPercentiles:[2,98],inverted:['nightlights','slope','road','river'],
         missingInputs:Object.keys(layers).filter(k=>!(k in stats.vulnerabilityWeights)),classLabels:palettes,...stats};
       for (const name of Object.keys(labels)) if(products[name]) render(name,products[name],prepared.grid,report);
+      el('optional').hidden=false;
       el('report').href=link(JSON.stringify(report,null,2),'application/json'); el('report').hidden=false;
       el('status').textContent='Risk maps ready. '+(report.missingInputs.length?'Available weights rescaled. Missing inputs: '+report.missingInputs.join(', ')+'. ':'')+'Transparent cells have no mapped value.';
     } catch(e) { if(job===active) el('status').textContent=e.message; }

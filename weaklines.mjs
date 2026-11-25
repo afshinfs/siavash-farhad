@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=single-map';
+import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=map-legends';
 // Runs in the aligned raster worker. Raster vertices use DEM grid coordinates.
 export function screenWeaklines({ width, height, dx, corridor, depthByPeriod, thresholdM, minimumM }) {
   const periods = Object.keys(depthByPeriod).map(Number).sort((a, b) => a - b);
@@ -270,7 +270,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     field('run').disabled = Boolean(active) || Boolean(waiting);
     field('cancel').disabled = !active;
     field('batch').disabled = Boolean(active) || !terrain || !result?.features.length;
-    field('search').disabled = Boolean(active);
+    for (const name of ['search','view-period','view-scenario','view-run']) field(name).disabled = Boolean(active);
     field('search-size').textContent = result?.features.length ? 'Possible closures before wet-cell filtering · ' +
       periods.map(year => year.toLocaleString() + ' years: ' +
         (2n ** BigInt(result.candidates.filter(candidate => candidate.period === year).length) - 1n).toLocaleString())
@@ -300,6 +300,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     active = null;
     result = null;
     batchOutput = null;
+    field('view-map').replaceChildren();
     field('batch-results').hidden = true;
     onClosureChange?.();
     selected.clear();
@@ -418,7 +419,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       return option;
     }));
     field('results').hidden = false;
-    showStudyArea(field('results'), result.report.grid);
+
     field('scenario').hidden = !features.length;
     showMap(features, prepared.bounds);
     refresh();
@@ -499,9 +500,51 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       return tr;
     }));
     field('batch-results').hidden = false;
-    showStudyArea(field('batch-results'), result.report.grid);
+    updateScenarioChoices();
     onClosureChange?.();
     status('Scenario search complete. Use Flood hazard maps to inspect the three modes.');
+  });
+  function updateScenarioChoices() {
+    field('view-map').replaceChildren();
+    const period = Number(field('view-period').value);
+    const row = batchOutput?.report.periods.find(r=>r.period===period);
+    const choices = field('view-scenario');
+    choices.replaceChildren(new Option('Open baseline','open'));
+    for (const [index,state] of (row?.scenarios ?? []).entries()) {
+      const winner = row.winner?.closed.join() === state.closed.join();
+      choices.add(new Option('Close '+state.closed.join(', ')+(winner?' · highest exposure':''),String(index)));
+    }
+  }
+  field('view-period').addEventListener('change',updateScenarioChoices);
+  field('view-scenario').addEventListener('change',()=>field('view-map').replaceChildren());
+  field('view-run').addEventListener('click',async()=>{
+    if(active || !batchOutput) return;
+    const period = Number(field('view-period').value);
+    const row = batchOutput.report.periods.find(r=>r.period===period);
+    const choice = field('view-scenario').value;
+    const closed = new Set(choice==='open' ? [] : row.scenarios[Number(choice)].closed);
+    const cells = result.candidates.filter(c=>closed.has(c.id)).flatMap(c=>c.cells);
+    const {dem,terrain,riverDistance,depths}=sourceInputs();
+    const parent = field('view-map');
+    parent.replaceChildren();
+    status('Preparing the selected depth map…');
+    const output = await runWorker('previewScenario',dem,{terrain,riverDistance,depth:depths[period],barrierCells:[...new Set(cells)]});
+    if (!output) return;
+    const {width,height}=result.report.grid.dimensions;
+    const max=output.values.reduce((m,v)=>Number.isFinite(v)?Math.max(v,m):m,0);
+    const canvas=document.createElement('canvas'), title=document.createElement('h4');
+    title.textContent=period.toLocaleString()+' years · '+field('view-scenario').selectedOptions[0].text;
+    canvas.setAttribute('aria-label',title.textContent+' · flood depth'); canvas.width=width; canvas.height=height;
+    const image=new ImageData(width,height);
+    output.values.forEach((v,i)=>{
+      if (!Number.isFinite(v)) return;
+      const f=max?v/max:0;
+      image.data.set([223-196*f,241-151*f,250-119*f,255],4*i);
+    });
+    canvas.getContext('2d').putImageData(image,0,0);
+    parent.append(title,canvas,rangeLegend(0,max,'Flood depth (m)','#dff1fa',max?'#1b5a83':'#dff1fa'));
+    showStudyArea(parent,result.report.grid,canvas);
+    status('Selected scenario depth displayed.');
   });
   field('batch-report').addEventListener('click', () => {
     if (batchOutput) download(batchOutput.report, 'siavash-weakline-scenarios.json');
