@@ -166,6 +166,12 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       appendRow(targets, [result.period.toLocaleString(), format(result.referenceCells),
         format(result.usableCells), format(result.wetCells), format(result.occupiedBlocks), result.status]);
     }
+    const wetOnly = report.targetResults.filter(target => target.usableCells > 0 && target.usableCells === target.wetCells);
+    field('wet-only').hidden = wetOnly.length === 0;
+    field('wet-only').textContent = wetOnly.length
+      ? 'No dry training cells for these return periods: ' + wetOnly.map(target => target.period.toLocaleString()).join(', ') +
+        ' years. XGBoost can estimate depths on the reference footprint, but these targets cannot teach it the wet–dry boundary. For flood extent modelling, load aligned targets with genuine dry depths.'
+      : '';
     for (const result of report.layers) {
       appendRow(layers, [predictors[result.name] ?? depths[result.name].toLocaleString() + '-year depth',
         result.source, format(result.validCells), result.error ? result.status + ' · ' + result.error : result.status]);
@@ -226,6 +232,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       layers: report.layers, completedAt: new Date().toISOString() };
     for (const values of trainingReport.results) {
       const row = appendRow(field('models'), [values.period.toLocaleString(), values.targetCells.toLocaleString(),
+        values.dryReferenceCells.toLocaleString(), values.excludedPredictorCellsWithoutReference.toLocaleString(),
         values.outOfFold.rmseM.toFixed(3), values.outOfFold.r2?.toFixed(3), values.wetPredictionCells.toLocaleString()]);
       const cell = row.insertCell();
       for (const item of result.exports.filter(item => item.period === values.period)) {
@@ -256,7 +263,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     refresh();
     trainingMessage('Preparing the checked raster inputs…');
     try {
-      const worker = new Worker(new URL('./depth-training-worker.js?v=desktop-training', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('./depth-training-worker.js?v=reference-support', import.meta.url), { type: 'module' });
       job.worker = worker;
       function finish(error, result) {
         if (current !== job) return;

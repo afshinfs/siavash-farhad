@@ -128,18 +128,26 @@ def train_depth_models(folder, predictors, targets, block_size, progress, *, fol
 
         progress(f"{period:,}-year model · refitting the selected parameters and exporting depth")
         final = XGBRegressor(**MODEL_OPTIONS, **best_parameters).fit(x_fit, y_fit)
-        prediction = np.concatenate([predict_depth(final, x[i:i + 32768]) for i in range(0, len(x), 32768)])
+        # A finite target, including zero, establishes reference coverage.
+        # Predict only inside that coverage. NoData can represent an exclusion.
+        prediction_cells = np.flatnonzero(valid)[eligible]
+        prediction = np.concatenate([
+            predict_depth(final, x_fit[i:i + 32768])
+            for i in range(0, len(x_fit), 32768)
+        ])
         output = np.full(rows * cols, np.nan, dtype=np.float32)
         wet = prediction >= WET_DEPTH
-        output[valid] = np.where(wet, prediction, np.nan)
+        output[prediction_cells] = np.where(wet, prediction, np.nan)
         _write_float32_like(dem_path, root / f"xgb_depth_{period}.tif", output.reshape(rows, cols), nodata=-9999)
-        # Analysis keeps dry cells on the grid for scenario routing and hazard classification.
-        output[valid] = np.maximum(prediction, 0)
+        # Retain dry depths within the reference support for downstream analysis.
+        output[prediction_cells] = np.maximum(prediction, 0)
         _write_float32_like(dem_path, root / f"xgb_analysis_{period}.tif", output.reshape(rows, cols), nodata=-9999)
         final.get_booster().save_model(root / f"xgb_model_{period}.json")
         results.append({
             "period": period, "targetCells": len(y_fit), "occupiedBlocks": block_count,
-            "predictionCells": len(prediction), "predictionCellsWithoutReference": int((~eligible).sum()),
+            "predictionCells": len(prediction), "predictionCellsWithoutReference": 0,
+            "excludedPredictorCellsWithoutReference": int((~eligible).sum()),
+            "dryReferenceCells": int((y_fit < WET_DEPTH).sum()),
             "wetPredictionCells": int(wet.sum()),
             "bestParameters": {key: value.item() if isinstance(value, np.generic) else value
                                for key, value in best_parameters.items()},
@@ -148,7 +156,7 @@ def train_depth_models(folder, predictors, targets, block_size, progress, *, fol
         })
 
     return {
-        "schemaVersion": 2, "stage": "XGBoost flood-depth modelling",
+        "schemaVersion": 3, "stage": "XGBoost flood-depth modelling",
         "predictorOrder": names, "modelParameters": MODEL_OPTIONS,
         "predictorPruning": {**pruning, "referencePeriod": 30, "absoluteCorrelationThreshold": 0.95,
                              "rankingSampleCap": pruning_options.perm_cap},
@@ -157,6 +165,7 @@ def train_depth_models(folder, predictors, targets, block_size, progress, *, fol
                             "method": "GroupKFold" if cv_mode == "block" else "Shuffled KFold",
                             "metrics": "Pooled tuning-fold predictions against GloFAS-derived targets. Predictor selection uses the full 30-year target and the folds also select hyperparameters."},
         "output": {"depthUnits": "m", "minimumDepth": 0.05, "wetThresholdM": 0.05, "nodata": -9999,
+                   "predictionDomain": "Valid model predictors and a finite reference target for that return period.",
                    "analysisDepth": "In-session analysis retains shallow cells and clips negative depths to zero."},
         "packages": {"xgboost": xgboost.__version__, "scikitLearn": sklearn.__version__, "rasterio": rasterio.__version__},
         "results": results,
