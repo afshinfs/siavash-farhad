@@ -302,6 +302,7 @@ def prune_features(
     *,
     opts: PruningOptions,
     logger: Optional[Logger] = None,
+    n_jobs: int = -1,
 ) -> Dict[str, Any]:
     rng = np.random.RandomState(opts.random_seed)
     names = list(feature_arrays.keys())
@@ -354,11 +355,11 @@ def prune_features(
             X_rank = X_full
             y_rank = y_fit  # type: ignore[assignment]
 
-        rf = RandomForestRegressor(n_estimators=250, random_state=opts.random_seed, n_jobs=-1)
+        rf = RandomForestRegressor(n_estimators=250, random_state=opts.random_seed, n_jobs=n_jobs)
         rf.fit(X_rank, y_rank)
 
         try:
-            perm = permutation_importance(rf, X_rank, y_rank, n_repeats=5, random_state=opts.random_seed, n_jobs=-1)
+            perm = permutation_importance(rf, X_rank, y_rank, n_repeats=5, random_state=opts.random_seed, n_jobs=n_jobs)
             imp = perm.importances_mean
             if logger:
                 logger("✓ pruning importance: permutation")
@@ -482,6 +483,17 @@ def build_high_hazard_composite(
     return _write_float32_like(template_raster_for_writing, out_path, comp, nodata=float(nodata_value))
 
 
+def xgb_parameter_distributions():
+    return {
+        "n_estimators": randint(200, 600),
+        "max_depth": randint(4, 12),
+        "learning_rate": uniform(0.01, 0.19),
+        "subsample": uniform(0.6, 0.4),
+        "colsample_bytree": uniform(0.6, 0.4),
+        "min_child_weight": uniform(1, 9),
+    }
+
+
 def train_xgb_depth_hazard(
     *,
     feature_arrays: Dict[str, np.ndarray],
@@ -515,14 +527,7 @@ def train_xgb_depth_hazard(
 
     groups_full = _spatial_groups(rows, cols, valid_mask_flat, xgb_opts.block_size) if xgb_opts.cv_mode == "block" else None
 
-    param_dist = {
-        "n_estimators": randint(200, 600),
-        "max_depth": randint(4, 12),
-        "learning_rate": uniform(0.01, 0.19),
-        "subsample": uniform(0.6, 0.4),
-        "colsample_bytree": uniform(0.6, 0.4),
-        "min_child_weight": uniform(1, 9),
-    }
+    param_dist = xgb_parameter_distributions()
     rmse_scorer = make_scorer(lambda y, yhat: _rmse(y, yhat), greater_is_better=False)
 
     outputs = MLOutputs(out_dir=str(out_dir), predictors_used=names)

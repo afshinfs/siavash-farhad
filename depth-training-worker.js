@@ -12,7 +12,7 @@ self.onmessage = async ({ data }) => {
   try {
     progress('Loading Python and XGBoost. The first run downloads the browser runtime.');
     const [{ loadPyodide }, helpers, program] = await Promise.all([
-      import(indexURL + 'pyodide.mjs'), readSource('./ml.py'), readSource('./train-depth.py?v=3'),
+      import(indexURL + 'pyodide.mjs'), readSource('./ml.py?v=desktop-training'), readSource('./train-depth.py?v=desktop-training'),
     ]);
     const py = await loadPyodide({ indexURL });
     await py.loadPackage(['numpy', 'scipy', 'scikit-learn', 'xgboost', 'rasterio']);
@@ -35,18 +35,22 @@ sys.path.insert(0, "/")`);
     const report = JSON.parse(await py.runPythonAsync(`
 config = json.loads(training_config)
 json.dumps(train_depth_models("/training", config["predictors"], config["targets"],
-                             config["blockSize"], training_progress, fold_count=config["foldCount"]), allow_nan=False)
+                             config["blockSize"], training_progress, fold_count=config["foldCount"], cv_mode=config["cvMode"]), allow_nan=False)
 `));
     const exports = [];
     const transfer = [];
+    const analysisDepths = {};
     for (const { period } of report.results) {
+      const analysis = py.FS.readFile(`/training/xgb_analysis_${period}.tif`).buffer;
+      analysisDepths[period] = analysis;
+      transfer.push(analysis);
       for (const [kind, filename] of [['depth', `xgb_depth_${period}.tif`], ['model', `xgb_model_${period}.json`]]) {
         const { buffer } = py.FS.readFile('/training/' + filename);
         exports.push({ period, kind, filename, buffer });
         transfer.push(buffer);
       }
     }
-    self.postMessage({ type: 'complete', report: { ...report, runtime: version }, exports }, transfer);
+    self.postMessage({ type: 'complete', report: { ...report, runtime: version }, exports, analysisDepths }, transfer);
   } catch (error) {
     const detail = String(error.message || error).trim().split('\n').at(-1);
     self.postMessage({ type: 'error', message: detail.slice(0, 500) });

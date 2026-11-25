@@ -1,7 +1,7 @@
 import { createRiskPanel } from './risk.mjs?v=map-legends';
 import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=map-legends';
 import { createHazardPanel } from './hazard.mjs?v=map-legends';
-import { createMLStackPanel } from './ml-stack.mjs?v=map-legends';
+import { createMLStackPanel } from './ml-stack.mjs?v=desktop-training';
 import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=map-legends';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=map-legends';
 
