@@ -3,7 +3,7 @@ import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs
 import { createHazardPanel } from './hazard.mjs?v=map-legends';
 import { createMLStackPanel } from './ml-stack.mjs?v=reference-support';
 import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=map-legends';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=map-legends';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=automatic-dry-depth';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -1237,9 +1237,9 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
         const units={lulc:'ESA class code',manning:'Manning n (s m⁻¹ᐟ³)',ndvi:'NDVI (−1 to 1)',ndvi_observations:'valid scene observations',rainfall:'mm accumulated over the selected period',spi_proxy:'standardised precipitation anomaly (z-score)',hsg_proxy:'soil-texture proxy group A=1, B=2, C=3, D=4',merit_hnd:'metres above EGM96 geoid (adjusted elevation)',...extraUnits};
         const classColors={10:[0,100,0],20:[255,187,34],30:[255,255,76],40:[240,150,255],50:[250,0,0],60:[180,180,180],70:[240,240,240],80:[0,100,200],90:[0,150,160],95:[0,207,117],100:[250,230,160]};
         for(const [name,layer] of Object.entries(layers)){
-          let count=0,min=Infinity,max=-Infinity,sum=0;for(const v of layer)if(v!==-9999){count++;min=Math.min(min,v);max=Math.max(max,v);sum+=v;}
+          let count=0,zeroCells=0,min=Infinity,max=-Infinity,sum=0;for(const v of layer)if(v!==-9999){count++;if(v===0)zeroCells++;min=Math.min(min,v);max=Math.max(max,v);sum+=v;}
           const preview=new Uint8ClampedArray(layer.length*4);for(let i=0;i<layer.length;i++){const v=layer[i];if(v===-9999)continue;const f=['building_presence_proxy','building_footprint_mask'].includes(name)?v:min===max?.5:(v-min)/(max-min),c=name==='lulc'?classColors[v]:name==='hsg_proxy'?[[0,0,0],[80,180,235],[100,190,100],[235,185,60],[175,85,65]][v]:[Math.round(40+190*f),Math.round(87+137*f),Math.round(82+80*f)];preview.set([...c,255],i*4);}
-          const output=writeFloatTIFF(layer,s.width,s.height,s.dx,s.dy,s.origin,s.epsg);products.push({name,tiff:output,preview:preview.buffer,summary:{validCells:count,noDataCells:layer.length-count,min:count?min:null,max:count?max:null,mean:count?sum/count:null,unit:units[name]}});transfer.push(output,preview.buffer);
+          const output=writeFloatTIFF(layer,s.width,s.height,s.dx,s.dy,s.origin,s.epsg);products.push({name,tiff:output,preview:preview.buffer,summary:{validCells:count,noDataCells:layer.length-count,...(data.group==='flood-depth'?{zeroDepthCells:zeroCells}:{}),min:count?min:null,max:count?max:null,mean:count?sum/count:null,unit:units[name]}});transfer.push(output,preview.buffer);
         }
         self.postMessage({type:'products',group:data.group,products},transfer);
       }

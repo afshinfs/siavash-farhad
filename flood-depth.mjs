@@ -14,47 +14,66 @@ export function buildFloodRequest(periods, { maskSpurious, maskWater }, { bounds
   const ref = valueReference => ({ valueReference });
   const image = value => invoke('Image.constant', { value: constant(value) });
   const select = (input, names) => invoke('Image.select', { input, bandSelectors: constant(names) });
-  const unmask = (input, value) => invoke('Image.unmask', {
-    input, value: image(value), sameFootprint: constant(false),
-  });
+  const rename = (input, name) => invoke('Image.rename', { input, names: constant([name]) });
+  const addBands = (dstImg, srcImg) => invoke('Image.addBands', { dstImg, srcImg });
+  const unmask = (input, value) => invoke('Image.unmask', { input, value, sameFootprint: constant(false) });
   const applyMask = (input, mask) => invoke('Image.updateMask', { image: input, mask });
+  const clip = (input, geometry) => invoke('Image.clip', { input, geometry });
+  const align = input => invoke('Image.reproject', { image: input, crs: ref('outputProjection') });
+  const equal = (image1, value) => invoke('Image.eq', { image1, image2: image(value) });
+  const notEqual = (image1, value) => invoke('Image.neq', { image1, image2: image(value) });
+  const collection = id => invoke('ImageCollection.load', { id: constant(id) });
   const { west, south, east, north } = bounds;
   const region = invoke('GeometryConstructors.Rectangle', {
     coordinates: constant([west, south, east, north]), geodesic: constant(false),
   });
   const { scaleX, scaleY, translateX, translateY } = grid.affineTransform;
-  const tile = { argumentReference: 'tile' };
-  let depth = select(tile, bandNames);
-  for (const [enabled, name] of [[maskSpurious, 'spurious_depth_category'], [maskWater, 'permanent_water_class']]) {
-    if (!enabled) continue;
-    // The QA bands can be sparse. Treat an absent flag as clear without filling depth.
-    const flag = unmask(select(tile, [name]), 0);
-    depth = applyMask(depth, invoke('Image.neq', { image1: flag, image2: image(1) }));
-  }
   const projection = invoke('Projection', {
     crs: constant(grid.crsCode), transform: constant([scaleX, 0, translateX, 0, scaleY, translateY]),
   });
-  // Resample individual source images using their own projections before mosaicking.
-  const aligned = invoke('Image.reproject', {
-    image: invoke('Image.resample', { image: depth, mode: constant('bilinear') }),
-    crs: ref('outputProjection'),
-  });
+
+  const tile = { argumentReference: 'tile' };
+  const tileGeometry = invoke('Image.geometry', { feature: tile });
+  const supportBand = 'glofas_tile_support';
+  const support = rename(align(clip(image(1), tileGeometry)), supportBand);
+  let published = select(tile, bandNames);
+  const flags = [];
+  for (const [enabled, name] of [[maskSpurious, 'spurious_depth_category'], [maskWater, 'permanent_water_class']]) {
+    if (!enabled) continue;
+    const flagged = equal(select(tile, [name]), 1);
+    // Mask flagged inputs before interpolation and keep the flags independent of depth.
+    published = applyMask(published, notEqual(unmask(flagged, image(0)), 1));
+    flags.push([name, rename(align(applyMask(flagged, flagged)), name)]);
+  }
+  const aligned = align(invoke('Image.resample', { image: published, mode: constant('bilinear') }));
+  const tileBands = flags.reduce((bands, [, flag]) => addBands(bands, flag), addBands(aligned, support));
   const tiles = invoke('Collection.map', {
-    collection: invoke('ImageCollection.load', { id: constant(glofasAsset) }),
+    collection: collection(glofasAsset),
     baseAlgorithm: { functionDefinitionValue: { argumentNames: ['tile'], body: 'alignTile' } },
   });
   const mosaic = invoke('Image.setDefaultProjection', {
     image: invoke('ImageCollection.mosaic', { collection: tiles }), crs: ref('outputProjection'),
   });
-  const clipped = invoke('Image.clip', { input: mosaic, geometry: region });
+
+  // Use land cover to keep the dry assumption off open water and outside valid land coverage.
+  // Fill after mosaicking so a dry fallback from one tile cannot hide an observed depth.
+  const cover = align(select(invoke('Collection.first', { collection: collection('ESA/WorldCover/v200') }), ['Map']));
+  const land = notEqual(cover, 80);
+  const drySupport = applyMask(select(ref('mosaic'), [supportBand]), land);
+  const observed = select(ref('mosaic'), bandNames);
+  let depth = unmask(observed, applyMask(image(0), drySupport));
+  for (const [name] of flags) {
+    depth = applyMask(depth, notEqual(unmask(select(ref('mosaic'), [name]), image(0)), 1));
+  }
   return {
     bandNames,
     expression: {
       result: 'depth',
       values: {
         outputProjection: projection,
-        alignTile: aligned,
-        depth: unmask(invoke('Image.toFloat', { value: clipped }), -9999),
+        alignTile: tileBands,
+        mosaic,
+        depth: unmask(invoke('Image.toFloat', { value: clip(depth, region) }), image(-9999)),
       },
     },
   };
@@ -192,10 +211,11 @@ const fit = ${fitGumbelDepths.toString()};
       }, 'Flood-depth');
       if (signal.aborted) return;
       report = {
-        schemaVersion: 1, stage: 'reference flood depths', asset: glofasAsset, nominalSourceResolutionM: 90,
+        schemaVersion: 2, stage: 'reference flood depths', asset: glofasAsset, nominalSourceResolutionM: 90,
         source: selected.info, sourceSHA256: prepared.sourceSHA256, grid: prepared.grid,
         demValidCells: prepared.validCells, periods, requestedSourcePeriods: inputs, settings, nodata: -9999,
-        resampling: 'Earth Engine bilinear on the DEM grid', processedAt: new Date().toISOString(),
+        resampling: 'Bilinear for published depth; nearest neighbour for land coverage and exclusions.',
+        dryDepthPolicy: 'A missing depth inside a GloFAS tile on valid ESA WorldCover 2021 land is inferred as 0 m. Enabled QA exclusions, open water without a depth, and areas without tile or land-cover support remain NoData.', processedAt: new Date().toISOString(),
         ...(targets.length && { gumbel: {
           interpolationPeriods: targets.filter(period => period <= inputs.at(-1)),
           extrapolationPeriods: targets.filter(period => period > inputs.at(-1)),
