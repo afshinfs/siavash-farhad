@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=area';
+import { showStudyArea } from './raster-cards.mjs?v=area-overlay';
 const predictors = {
   dem_filled: 'Filled DEM', twi: 'TWI', logflowacc: 'Log flow accumulation', flowacc: 'Flow accumulation',
   slope: 'Slope', aspect: 'Aspect', trasp: 'TRASP', plan_curvature: 'Planform curvature',

@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs?v=area';
-import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=area';
-import { createHazardPanel } from './hazard.mjs?v=area';
-import { createMLStackPanel } from './ml-stack.mjs?v=area';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=area';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=area';
+import { createRiskPanel } from './risk.mjs?v=area-overlay';
+import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=area-overlay';
+import { createHazardPanel } from './hazard.mjs?v=area-overlay';
+import { createMLStackPanel } from './ml-stack.mjs?v=area-overlay';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=area-overlay';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=area-overlay';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';

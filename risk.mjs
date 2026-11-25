@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=area';
+import { showStudyArea } from './raster-cards.mjs?v=area-overlay';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],
