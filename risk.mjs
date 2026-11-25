@@ -1,3 +1,4 @@
+import { showStudyArea } from './raster-cards.mjs?v=area';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],
@@ -128,7 +129,7 @@ export function createRiskPanel({element, read, rasterWorker, callWorker}) {
     caption.textContent=stats ? stats.positiveCells.toLocaleString()+' positive risk cells · '+stats.applied+' classes' : 'Scaled within the study area';
     const a=document.createElement('a'); a.href=link(product.tiff,'image/tiff'); a.download='farhad_'+report.mode+'_'+report.method+'_'+name+'.tif';
     a.textContent='Download GeoTIFF'; a.setAttribute('aria-label','Download '+title.textContent+' GeoTIFF');
-    figure.append(title,canvas,legend,caption,a); el('maps').append(figure);
+    figure.append(title,canvas,legend,caption,a); showStudyArea(figure,grid); el('maps').append(figure);
   }
   el('run').onclick=async()=>{
     if(el('run').disabled) return;

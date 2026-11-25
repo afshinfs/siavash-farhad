@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs';
-import { appendRasterCard } from './raster-cards.mjs?v=1';
-import { createHazardPanel } from './hazard.mjs?v=4';
-import { createMLStackPanel } from './ml-stack.mjs?v=9';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=5';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=5';
+import { createRiskPanel } from './risk.mjs?v=area';
+import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=area';
+import { createHazardPanel } from './hazard.mjs?v=area';
+import { createMLStackPanel } from './ml-stack.mjs?v=area';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=area';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=area';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -237,6 +237,7 @@ function drawElevation(data,requestedGrid) {
   const canvas=document.createElement('canvas');canvas.width=width;canvas.height=height;
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.rgba),width,height),0,0);
   el('ee-preview').replaceChildren(canvas);canvas.setAttribute('aria-label','SRTM elevation preview; relative elevation colours');
+  showStudyArea(el('ee-preview'), requestedGrid);
   // Keep the preview in its native UTM grid. Avoid draping a UTM image on a
   // latitude/longitude rectangle without reprojection.
 }
@@ -493,6 +494,7 @@ async function runTerrain(){
       for(const p of terrainProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));terrainURLs.push(downloadURL);
         appendRasterCard(el('terrain-cards'), p, {
+          grid: terrainReport,
           label: terrainNames[p.name], width: terrainReport.width, height: terrainReport.height,
           url: downloadURL, filename: p.name + '_aligned.tif',
         });
@@ -674,6 +676,7 @@ async function runHydro(){
       for(const p of hydroProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));hydroURLs.push(downloadURL);
         appendRasterCard(el('hydro-cards'), p, {
+          grid: hydroReport,
           label: hydroNames[p.name], width: hydroReport.width, height: hydroReport.height,
           url: downloadURL, filename: p.name + '_aligned.tif',
         });
@@ -864,6 +867,7 @@ async function runLinear(){
       for(const p of linearProducts){
         const downloadURL=URL.createObjectURL(new Blob([p.tiff],{type:'image/tiff'}));linearURLs.push(downloadURL);
         appendRasterCard(el('linear-cards'), p, {
+          grid: linearReport,
           label: linearNames[p.name], width: linearReport.width, height: linearReport.height,
           url: downloadURL, filename: p.name + '_aligned.tif',
         });
@@ -1229,6 +1233,7 @@ function addSatelliteProducts(products) {
     const url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
     satURLs.push(url);
     appendRasterCard(el('sat-cards'), product, {
+          grid: satReport.grid,
       ...satReport.grid.dimensions, label: satNames[product.name],
       url, filename: product.name + '_aligned.tif',
     });
@@ -2420,6 +2425,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange, onEx
       const url = URL.createObjectURL(new Blob([tiff], { type: 'image/tiff' }));
       urls.push(url);
       appendRasterCard(field('cards'), product, {
+        grid: report.grid,
         ...report.grid.dimensions, label, url, filename: name + '_aligned.tif',
       });
     }

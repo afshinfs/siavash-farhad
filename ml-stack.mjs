@@ -1,3 +1,4 @@
+import { showStudyArea } from './raster-cards.mjs?v=area';
 const predictors = {
   dem_filled: 'Filled DEM', twi: 'TWI', logflowacc: 'Log flow accumulation', flowacc: 'Flow accumulation',
   slope: 'Slope', aspect: 'Aspect', trasp: 'TRASP', plan_curvature: 'Planform curvature',
@@ -173,6 +174,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     field('summary').textContent = report.predictorCells === null ? 'Complete the predictor stack to calculate joint coverage.'
       : 'Complete predictor coverage: ' + format(report.predictorCells) + ' of ' + format(report.demCells) + ' valid DEM cells.';
     field('results').hidden = false;
+    showStudyArea(field('results'), report.grid);
     field('report').disabled = false;
     message(report.passed ? 'Raster-stack check passed.' : 'Raster-stack check found issues. Review the results below.', !report.passed);
   }
@@ -239,6 +241,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
       }
     }
     field('training-results').hidden = false;
+    showStudyArea(field('training-results'), report.grid);
     field('training-report').disabled = false;
     trainedDepths = Object.fromEntries(result.exports.filter(item => item.kind === 'depth')
       .map(item => [item.period, item.buffer]));

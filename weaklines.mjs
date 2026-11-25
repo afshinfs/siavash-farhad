@@ -1,3 +1,4 @@
+import { showStudyArea } from './raster-cards.mjs?v=area';
 // Runs in the aligned raster worker. Raster vertices use DEM grid coordinates.
 export function screenWeaklines({ width, height, dx, corridor, depthByPeriod, thresholdM, minimumM }) {
   const periods = Object.keys(depthByPeriod).map(Number).sort((a, b) => a - b);
@@ -417,6 +418,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       return option;
     }));
     field('results').hidden = false;
+    showStudyArea(field('results'), result.report.grid);
     field('scenario').hidden = !features.length;
     showMap(features, prepared.bounds);
     refresh();
@@ -497,6 +499,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       return tr;
     }));
     field('batch-results').hidden = false;
+    showStudyArea(field('batch-results'), result.report.grid);
     onClosureChange?.();
     status('Scenario search complete. Use Flood hazard maps to inspect the three modes.');
   });

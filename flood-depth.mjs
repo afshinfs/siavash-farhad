@@ -1,4 +1,4 @@
-import { appendRasterCard } from './raster-cards.mjs?v=1';
+import { appendRasterCard } from './raster-cards.mjs?v=area';
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
 const gumbelPeriods = [25, 30, 300, 1000];
@@ -217,6 +217,7 @@ const fit = ${fitGumbelDepths.toString()};
         const label = period.toLocaleString() + '-year · ' + method;
         outputs.push({ ...product, label, url });
         appendRasterCard(field('cards'), product, {
+          grid: report.grid,
           ...report.grid.dimensions, label, url, filename: 'flood_' + period + 'yr_aligned.tif',
         });
       }
