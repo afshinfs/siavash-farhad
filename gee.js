@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs?v=area-overlay';
-import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=area-overlay';
-import { createHazardPanel } from './hazard.mjs?v=area-overlay';
-import { createMLStackPanel } from './ml-stack.mjs?v=area-overlay';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=area-overlay';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=area-overlay';
+import { createRiskPanel } from './risk.mjs?v=single-map';
+import { showStudyArea, appendRasterCard } from './raster-cards.mjs?v=single-map';
+import { createHazardPanel } from './hazard.mjs?v=single-map';
+import { createMLStackPanel } from './ml-stack.mjs?v=single-map';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=single-map';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=single-map';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -315,6 +315,7 @@ setInterval(()=>{if(token&&Date.now()>=expiresAt&&!busy){clearAccess();el('ee-st
 async function startMap() {
   try {
     await Promise.all([loadScript('https://unpkg.com/leaflet@1.9.4/dist/leaflet.js','leaflet-sdk'),loadScript('https://cdn.jsdelivr.net/npm/proj4@2.12.1/dist/proj4.js','proj4-sdk')]);
+    window.dispatchEvent(new Event('study-map-libraries-ready'));
     map=window.L.map('ee-map').setView([33.145,47.715],13);
     window.L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',{maxZoom:19,attribution:'&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap contributors</a>'}).addTo(map);
     map.on('click',event=>{

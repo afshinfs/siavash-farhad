@@ -26,14 +26,20 @@ function rasterImage(canvas, grid, projection, [west, south, east, north]) {
 
 class StudyAreaMap extends HTMLElement {
   connectedCallback() {
+    this.onLibrariesReady = () => {
+      if (this.inView) this.render();
+    };
+    window.addEventListener('study-map-libraries-ready', this.onLibrariesReady);
     this.observer = new IntersectionObserver(([entry]) => {
-      if (entry.isIntersecting) this.render();
+      this.inView = entry.isIntersecting;
+      if (this.inView) this.render();
     });
     this.observer.observe(this);
   }
 
   disconnectedCallback() {
     this.observer.disconnect();
+    window.removeEventListener('study-map-libraries-ready', this.onLibrariesReady);
     this.map?.remove();
     this.map = null;
     this.overlay = null;
@@ -86,6 +92,10 @@ customElements.define('study-area-map', StudyAreaMap);
 export function showStudyArea(parent, grid, canvas = parent.querySelector(':scope > canvas')) {
   let view = parent.querySelector(':scope > study-area-map');
   if (view && view.grid !== grid) {
+    if (canvas && view.contains(canvas)) {
+      canvas.hidden = false;
+      view.before(canvas);
+    }
     view.remove();
     view = null;
   }
@@ -93,8 +103,10 @@ export function showStudyArea(parent, grid, canvas = parent.querySelector(':scop
     view = document.createElement('study-area-map');
     view.grid = grid;
     view.setAttribute('aria-label', canvas?.getAttribute('aria-label') || 'Study area');
-    if (canvas) canvas.after(view);
-    else parent.append(view);
+    if (canvas) {
+      canvas.before(view);
+      view.append(canvas);
+    } else parent.append(view);
   }
   view.canvas = canvas;
   view.dirty = true;

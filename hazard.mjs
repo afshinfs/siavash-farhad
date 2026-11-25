@@ -1,4 +1,4 @@
-import { showStudyArea } from './raster-cards.mjs?v=area-overlay';
+import { showStudyArea } from './raster-cards.mjs?v=single-map';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, mode = 'baseline', basis = 'auto', clean }) {
   const size = width * height;
@@ -281,7 +281,8 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
     const noData = document.createElement('span');
     noData.textContent = 'Transparent = NoData';
     legendNode.append(noData);
-    showStudyArea(canvas.parentElement, result.report.grid, canvas);
+    const preview = canvas.closest('study-area-map')?.parentElement ?? canvas.parentElement;
+    showStudyArea(preview, result.report.grid, canvas);
   }
   function showLayer() {
     if (!result) return;
