@@ -97,7 +97,7 @@ const palettes = {foen_class:['','Low','Medium','High','Very high'],adr7_class:[
 const colors = ['#edf1ef','#ffedbc','#ffc96d','#f18f4e','#c94e42','#802744'];
 export function createRiskPanel({element, read, readRivers, rasterWorker, callWorker}) {
   const el = name => element('risk-'+name);
-  let job, urls=[];
+  let job, urls=[], reportLayers=[];
   function refresh() {
     const {hazard,layers} = read();
     const need = !hazard ? 'Calculate flood hazard in Step 07.' :
@@ -109,6 +109,7 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
   function reset() {
     job?.controller.abort(); job?.worker?.terminate(); job=null;
     urls.forEach(URL.revokeObjectURL); urls=[];
+    reportLayers=[];
     el('fill-patches').onchange = null;
     el('patch-control').hidden = true;
     el('maps').replaceChildren(); el('other-maps').replaceChildren(); el('optional').open=false; el('optional').hidden=true; el('report').hidden=true; el('status').textContent='';
@@ -177,7 +178,16 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     const draw = (name, target, protectRiver) => render(name, products[name], report.grid, report, downloads[name],
       noRisk[name.split('_')[0]], rivers, target, protectRiver ? riverCells : null);
 
-    const renderClasses = ['foen_class', 'adr7_class'].map(name => {
+    const riskClasses=['foen_class','adr7_class'];
+    reportLayers=Object.keys(products).filter(name=>labels[name]).map(name=>({
+      title:labels[name], group:report.mode+' / '+report.method,
+      render() {
+        const target=document.createElement('div');
+        draw(name,target,riskClasses.includes(name));
+        return {view:target.querySelector('study-area-map'),legend:target.querySelector('.map-legend')};
+      },
+    }));
+    const renderClasses = riskClasses.map(name => {
       const figure = document.createElement('figure'), title = document.createElement('h3');
       const output = document.createElement('div');
       title.textContent = labels[name];
@@ -233,5 +243,5 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
   };
   el('method').onchange=el('bins').onchange=reset;
   el('cancel').onclick=()=>{reset();el('status').textContent='Calculation cancelled.';};
-  return {reset,refresh};
+  return {reset,refresh,reportMaps:()=>reportLayers};
 }

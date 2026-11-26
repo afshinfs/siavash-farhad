@@ -21,8 +21,7 @@ function available(element, step) {
 function collect(groups) {
   return groups.flatMap(({number, title, sections}) => sections.flatMap(section =>
     [...section.querySelectorAll('study-area-map')].filter(view =>
-      view.canvas?.width && available(view,section) &&
-      !['hazard-canvas','hazard-foen-map','hazard-adr-map'].includes(view.canvas.id)
+      view.canvas?.width && available(view,section)
     ).map(view => ({
       section: number+' · '+title,
       group: section.querySelector('h2')?.textContent,
@@ -128,6 +127,10 @@ export function createStudyReport({groups, readBounds, getExtraOutputs}) {
       for(let page=1;page<=pdf.getNumberOfPages();page++){
         pdf.setPage(page);
         write(pdf,'Screening output | Maps clipped to the selected study area | '+page+' / '+pdf.getNumberOfPages(),16,287,178,9);
+      }
+      const current=readBounds();
+      if (!current || Object.keys(bounds).some(key=>current[key]!==bounds[key])) {
+        throw Error('The applied study area changed. Review the selected outputs and export again.');
       }
       pdf.save('siavash-farhad-study-area-report.pdf');
       status.textContent='PDF exported with '+selected.length+' selected output'+(selected.length===1?'':'s')+'.';

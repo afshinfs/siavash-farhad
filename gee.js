@@ -1,6 +1,6 @@
-import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs';
+import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs?v=study-report';
 import { exportMapImage, mapLegend } from './map-export.mjs';
-import { createRiskPanel } from './risk.mjs?v=export-report';
+import { createRiskPanel } from './risk.mjs?v=study-report';
 import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 import { createHazardPanel } from './hazard.mjs?v=export-report';
 import { createMLStackPanel } from './ml-stack.mjs?v=automatic-folds';
@@ -2669,8 +2669,6 @@ const reportGroups = [
   ['04','GloFAS reference depths',['flood-title']],
   ['05','Flood-depth models',['ml-stack-title']],
   ['06','Weakline scenarios',['weakline-title']],
-  ['07','Flood hazard maps',['hazard-title']],
-  ['08','Flood risk maps',['risk-title']],
 ].map(([number,title,ids])=>({number,title,sections:ids.map(id=>el(id).closest('section'))}));
 
 async function reportRasterPreview(source) {
@@ -2704,9 +2702,13 @@ const studyReport=createStudyReport({
         legend:()=>[{label:'River',colors:['#1686b6']},{label:'Major road',colors:['#a65c00']}],
       });
     }
-    for (const item of hazardPanel.reportMaps()) {
+    const resultMaps=[
+      ...hazardPanel.reportMaps().map(item=>({...item,section:'07 · Flood hazard maps'})),
+      ...riskPanel.reportMaps().map(item=>({...item,section:'08 · Flood risk maps'})),
+    ];
+    for (const item of resultMaps) {
       let legend;
-      maps.push({...item,section:'07 · Flood hazard maps',
+      maps.push({...item,
         image:bounds=>{const rendered=item.render();legend=mapLegend(rendered.legend);return exportMapImage(rendered.view,bounds);},
         legend:()=>legend,
       });
