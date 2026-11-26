@@ -1,4 +1,4 @@
-import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=dry-patches';
+import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 // Runs in the aligned raster worker. Raster vertices use DEM grid coordinates.
 export function screenWeaklines({ width, height, dx, corridor, depthByPeriod, thresholdM, minimumM }) {
   const periods = Object.keys(depthByPeriod).map(Number).sort((a, b) => a - b);

@@ -1,4 +1,4 @@
-import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=dry-patches';
+import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
   const size = width * height;

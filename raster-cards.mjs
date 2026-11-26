@@ -30,12 +30,14 @@ export function mapRiverCells(grid, rivers) {
   return Uint8Array.from({ length: width * height }, (_, i) => Number(rgba[4 * i + 3] > 0));
 }
 
-export function fillDryPatches(values, width, height, riverCells) {
+export function fillDryPatches(values, width, height, riverCells, noRisk) {
+  const maxPatchCells = 8;
+  const isPatchCell = i => noRisk ? noRisk[i] === 1 : values[i] === 0;
   let pixels = values;
   let filled = 0;
-  // A patch includes dry cells that meet along an edge or at a corner.
+  // A patch includes cells that meet along an edge or at a corner.
   for (let start = 0; start < values.length; start++) {
-    if (values[start] !== 0) continue;
+    if (!isPatchCell(start)) continue;
     const patch = new Set([start]);
     const boundary = new Set();
     let enclosed = true;
@@ -49,14 +51,14 @@ export function fillDryPatches(values, width, height, riverCells) {
         for (let col = x - 1; col <= x + 1; col++) {
           const j = row * width + col;
           const value = values[j];
-          if (riverCells[j] || !Number.isFinite(value)) {
+          if (riverCells[j] || (!isPatchCell(j) && !Number.isFinite(value))) {
             enclosed = false;
             break scan;
           }
-          if (value === 0) {
+          if (isPatchCell(j)) {
             patch.add(j);
-            // Only the first cell counts the patch. Stop scanning upon finding a third dry cell.
-            if (j < start || patch.size > 2) {
+            // Only the first cell counts the patch. Stop scanning when it exceeds the size limit.
+            if (j < start || patch.size > maxPatchCells) {
               enclosed = false;
               break scan;
             }
