@@ -241,7 +241,18 @@ const worldCover = [
   ['Snow and ice','#f0f0f0'], ['Permanent water','#0064c8'], ['Herbaceous wetland','#0096a0'],
   ['Mangroves','#00cf75'], ['Moss and lichen','#fae6a0'],
 ];
-const soil = [['Group A','#50b4eb'],['Group B','#64be64'],['Group C','#ebb93c'],['Group D','#af5541']];
+const soil = [
+  ['A · High infiltration','#50b4eb'], ['B · Moderate infiltration','#64be64'],
+  ['C · Slow infiltration','#ebb93c'], ['D · Very slow infiltration','#af5541'],
+];
+
+export function presentClasses(entries, pixels) {
+  const colors = new Set();
+  for(let i=0;i<pixels.length;i+=4) {
+    if (pixels[i+3]) colors.add(pixels[i]*65536+pixels[i+1]*256+pixels[i+2]);
+  }
+  return entries.filter(([,color])=>colors.has(Number.parseInt(color.slice(1),16)));
+}
 const directions = ['Outlet','East','Southeast','South','Southwest','West','Northwest','North','Northeast'];
 const directionColors = ['#8e8e8e','#d73027','#fc8d59','#fee090','#91cf60','#1a9850','#3288bd','#5149a4','#b358a5'];
 const fmt = value => value.toLocaleString(undefined,{maximumSignificantDigits:4});
@@ -296,7 +307,7 @@ export function appendRasterCard(container, product, { label, width, height, gri
     const pixels = new Uint8ClampedArray(product.preview);
     canvas.getContext('2d').putImageData(new ImageData(pixels, width, height), 0, 0);
     card.append(canvas);
-    const categories = product.name === 'lulc' ? worldCover : product.name === 'hsg_proxy' ? soil
+    const categories = product.name === 'lulc' ? presentClasses(worldCover,pixels) : product.name === 'hsg_proxy' ? presentClasses(soil,pixels)
       : product.name === 'flow_direction' ? directions.map((label,i)=>[label,directionColors[i]])
       : ['building_presence_proxy','building_footprint_mask'].includes(product.name)
         ? [['No mapped building','#285752'],['Building present','#e6e0a2']] : null;

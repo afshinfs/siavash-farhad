@@ -1,5 +1,5 @@
 import { mapDownloads } from "./map-export.mjs?v=legend-columns";
-import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
+import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=tidy-panels';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],

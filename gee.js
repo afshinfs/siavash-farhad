@@ -1,12 +1,12 @@
 import { setFileClearButton, reflectFileSource } from './file-selection.mjs';
 import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs?v=legend-columns';
 import { exportMapImage, mapLegend } from './map-export.mjs?v=legend-columns';
-import { createRiskPanel } from './risk.mjs?v=legend-columns';
-import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=patch-eight';
-import { createHazardPanel } from './hazard.mjs?v=legend-columns';
+import { createRiskPanel } from './risk.mjs?v=tidy-panels';
+import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=tidy-panels';
+import { createHazardPanel } from './hazard.mjs?v=tidy-panels';
 import { createMLStackPanel } from './ml-stack.mjs?v=session-controls';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=session-controls';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=session-controls';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=tidy-panels';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=tidy-panels';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';

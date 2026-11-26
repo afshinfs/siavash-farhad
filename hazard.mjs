@@ -1,5 +1,5 @@
 import { mapDownloads } from "./map-export.mjs?v=legend-columns";
-import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
+import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=tidy-panels';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
   const size = width * height;
@@ -197,7 +197,9 @@ function productDescription(name) {
 
 export function createHazardPanel({ element, readInputs, readScenarios, readRivers, onChange, rasterWorker, callWorker }) {
   const field = name => element('hazard-' + name);
-  let active = null, result = null, url = null;
+  let active = null, result = null;
+  const layerURLs = new Map();
+  let redrawLayers = [];
   const legends = {
     danger: [[0, 'Dry / no class', '#edf3ee'], [1, 'Low', '#efcf58'], [2, 'Medium', '#628fce'], [3, 'Significant', '#a12639'], [4, 'Residual', '#f8de70']],
     adr: [[0, 'Dry / no class', '#edf3ee'], [1, 'H1', '#94d1ae'], [2, 'H2', '#e2d46e'], [3, 'H3', '#efa65a'], [4, 'H4', '#e47052'], [5, 'H5', '#b63f62'], [6, 'H6', '#69204b']],
@@ -242,18 +244,16 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     field('status').hidden = !message;
     field('status').classList.toggle('error', error);
   }
-  function clearDownload() {
-    if (url) URL.revokeObjectURL(url);
-    url = null;
-    field('download').removeAttribute('href');
-  }
   function invalidate() {
     active?.controller.abort();
     active?.worker?.terminate();
     active = null;
     result = null;
     onChange();
-    clearDownload();
+    for (const url of layerURLs.values()) URL.revokeObjectURL(url);
+    layerURLs.clear();
+    redrawLayers = [];
+    field('other-maps').replaceChildren();
     field('results').hidden = true;
     field('foen-downloads').replaceChildren();
     field('adr-downloads').replaceChildren();
@@ -327,17 +327,45 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
       });
     }
   }
-  function showLayer() {
-    if (!result) return;
-    const name = field('layer').value;
-    const product = result.products[name];
-    drawLayer(name, field('canvas'), field('legend'));
-    field('coverage').textContent = product.summary.validCells.toLocaleString() + ' classified or calculated cells.';
-    clearDownload();
-    url = URL.createObjectURL(new Blob([product.tiff], { type: 'image/tiff' }));
-    field('download').href = url;
-    field('download').download = 'siavash_' + result.report.mode + '_' + name + '.tif';
+  function showGroupedLayers() {
+    const names = Object.keys(result.products).filter(name=>!['foen_champion','adr7_envelope'].includes(name));
+    const groups = [
+      ['FOEN hazard', name=>name.startsWith('foen_')],
+      ['ADR7 hazard and return periods', name=>name.startsWith('adr7_')],
+      ['Manning velocity', name=>productDescription(name)[1]==='velocity'],
+      ['Depth × velocity', name=>productDescription(name)[1]==='dv'],
+    ];
+    redrawLayers = groups.flatMap(([title,filter])=>{
+      const options=names.filter(filter);
+      if (!options.length) return [];
+      const figure=document.createElement('figure'), label=document.createElement('label');
+      const select=document.createElement('select'), canvas=document.createElement('canvas');
+      const legend=document.createElement('div'), coverage=document.createElement('p'), link=document.createElement('a');
+      legend.className='map-legend ee-help';
+      coverage.className='ee-help';
+      canvas.setAttribute('role','img');
+      select.replaceChildren(...options.map(name=>new Option(productDescription(name)[0],name)));
+      label.append(title,select);
+      link.textContent='Download selected GeoTIFF';
+      figure.append(label,canvas,legend,coverage,link);
+      field('other-maps').append(figure);
+      const redraw=()=>{
+        const name=select.value, product=result.products[name];
+        drawLayer(name,canvas,legend);
+        coverage.textContent=product.summary.validCells.toLocaleString()+' classified or calculated cells.';
+        if (!layerURLs.has(name)) layerURLs.set(name,URL.createObjectURL(new Blob([product.tiff],{type:'image/tiff'})));
+        link.href=layerURLs.get(name);
+        link.download='siavash_'+result.report.mode+'_'+name+'.tif';
+      };
+      select.addEventListener('change',redraw);
+      return [redraw];
+    });
+    refreshOptionalLayers();
   }
+  function refreshOptionalLayers() {
+    if (result && field('optional').open) redrawLayers.forEach(draw=>draw());
+  }
+  field('optional').addEventListener('toggle',refreshOptionalLayers);
   field('run').addEventListener('click', async () => {
     if (field('run').disabled) return;
     const { dem, slope, manning, depths, predicted, available, referenceDepths } = read();
@@ -381,9 +409,6 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
           [name, { label: productDescription(name)[0], ...product.summary }])),
       } };
       onChange();
-      const names = Object.keys(products).sort((a, b) => Number(/_\d+$/.test(a)) - Number(/_\d+$/.test(b)));
-      field('layer').replaceChildren(...names.map(name => new Option(productDescription(name)[0], name)));
-      field('layer').value = 'adr7_envelope';
       field('results').hidden = false;
       const hasRiver = result.rivers.length && window.proj4;
       field('dry-control').hidden = false;
@@ -394,7 +419,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
       showOverviewDownloads();
       field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
         ' · Significant cells: ' + champion.depthCount.toLocaleString() + ' by depth, ' + champion.dvCount.toLocaleString() + ' by depth × velocity.';
-      showLayer();
+      showGroupedLayers();
       const rows = Object.values(coverage);
       const notes = [];
       if (rows.some(row => row.referenceFallbackCells)) notes.push('Aligned reference depth supplied gaps in the XGBoost predictions.');
@@ -412,11 +437,10 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
   });
   for (const name of ['source', 'mode', 'basis', 'clean']) field(name).addEventListener('change', invalidate);
   field('cancel').addEventListener('click', () => { invalidate(); status('Hazard processing cancelled.'); });
-  field('layer').addEventListener('change', showLayer);
   function refreshDryDisplay() {
     if (!result) return;
     drawOverview();
-    drawLayer(field('layer').value, field('canvas'), field('legend'));
+    refreshOptionalLayers();
   }
   field('fill-dry').addEventListener('change', refreshDryDisplay);
   field('report').addEventListener('click', () => {

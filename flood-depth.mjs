@@ -1,5 +1,5 @@
 import { reflectFileSource } from './file-selection.mjs';
-import { appendRasterCard } from './raster-cards.mjs?v=patch-eight';
+import { appendRasterCard } from './raster-cards.mjs?v=tidy-panels';
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
 const gumbelPeriods = [25, 30, 300, 1000];
