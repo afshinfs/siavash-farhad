@@ -1,3 +1,85 @@
+// Rasterize the displayed river lines on the same native grid as the classes.
+// A one-cell stroke conservatively protects cells even on diagonal reaches.
+export function mapRiverCells(grid, rivers) {
+  const { width, height } = grid.dimensions || grid;
+  const transform = grid.affineTransform || grid.transform;
+  const epsg = Number((grid.crsCode || grid.crs).split(':').pop());
+  const utm = '+proj=utm +zone=' + (epsg % 100) + (epsg >= 32700 ? ' +south' : '') + ' +datum=WGS84 +units=m';
+  const projection = window.proj4('EPSG:4326', utm);
+  const canvas = document.createElement('canvas');
+  canvas.width = width;
+  canvas.height = height;
+  const ctx = canvas.getContext('2d');
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+  ctx.beginPath();
+  for (const { geometry } of rivers) {
+    const lines = geometry.type === 'MultiLineString' ? geometry.coordinates : [geometry.coordinates];
+    for (const line of lines) {
+      line.forEach((point, i) => {
+        const [x, y] = projection.forward(point);
+        ctx[i === 0 ? 'moveTo' : 'lineTo'](
+          (x - transform.translateX) / transform.scaleX,
+          (y - transform.translateY) / transform.scaleY,
+        );
+      });
+    }
+  }
+  ctx.stroke();
+  const rgba = ctx.getImageData(0, 0, width, height).data;
+  return Uint8Array.from({ length: width * height }, (_, i) => Number(rgba[4 * i + 3] > 0));
+}
+
+export function fillSmallMapGaps(values, width, height, riverCells, noRisk) {
+  const visited = new Uint8Array(values.length);
+  const isGap = i => Number.isNaN(values[i]) && !noRisk?.[i];
+  let pixels = values;
+  let filled = 0;
+  for (let start = 0; start < values.length; start++) {
+    if (visited[start] || !isGap(start)) continue;
+    const gap = [start];
+    const boundary = new Set();
+    let excluded = false;
+    visited[start] = 1;
+    for (const i of gap) {
+      const x = i % width, y = Math.floor(i / width);
+      if (riverCells[i] || x === 0 || x === width - 1 || y === 0 || y === height - 1) excluded = true;
+      for (let row = Math.max(0, y - 1); row <= Math.min(height - 1, y + 1); row++) {
+        for (let col = Math.max(0, x - 1); col <= Math.min(width - 1, x + 1); col++) {
+          const j = row * width + col;
+          if (riverCells[j]) excluded = true;
+          if (isGap(j)) {
+            if (!visited[j]) {
+              visited[j] = 1;
+              gap.push(j);
+              if (gap.length > 3) excluded = true;
+            }
+          } else if (!excluded) boundary.add(j);
+        }
+      }
+    }
+    if (excluded) continue;
+    const counts = new Map();
+    for (const j of boundary) {
+      const value = noRisk?.[j] ? 0 : values[j];
+      if (Number.isFinite(value)) counts.set(value, (counts.get(value) || 0) + 1);
+    }
+    let winner = 0, best = 0, tied = false;
+    for (const [value, count] of counts) {
+      if (count > best) {
+        winner = value;
+        best = count;
+        tied = false;
+      } else if (count === best) tied = true;
+    }
+    if (winner <= 0 || tied) continue;
+    if (pixels === values) pixels = values.slice();
+    for (const i of gap) pixels[i] = winner;
+    filled += gap.length;
+  }
+  return { pixels, filled };
+}
+
 // Reproject the display pixels to Web Mercator. The source canvas and exported
 // GeoTIFF retain the native grid. Nearest-neighbour keeps categorical colours.
 function rasterImage(canvas, grid, projection, [west, south, east, north], stripeColor) {

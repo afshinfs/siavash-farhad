@@ -1,4 +1,4 @@
-import { appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=river-maps';
+import { fillSmallMapGaps, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=gap-fill';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],
@@ -96,7 +96,7 @@ const palettes = {foen_class:['','Low','Medium','High','Very high'],adr7_class:[
 const colors = ['#edf1ef','#ffedbc','#ffc96d','#f18f4e','#c94e42','#802744'];
 export function createRiskPanel({element, read, readRivers, rasterWorker, callWorker}) {
   const el = name => element('risk-'+name);
-  let job, urls=[];
+  let job, urls=[], redrawRiskClasses;
   function refresh() {
     const {hazard,layers} = read();
     const need = !hazard ? 'Calculate flood hazard in Step 07.' :
@@ -108,17 +108,24 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
   function reset() {
     job?.controller.abort(); job?.worker?.terminate(); job=null;
     urls.forEach(URL.revokeObjectURL); urls=[];
+    redrawRiskClasses = null;
+    el('gap-control').hidden = true;
     el('maps').replaceChildren(); el('other-maps').replaceChildren(); el('optional').open=false; el('optional').hidden=true; el('report').hidden=true; el('status').textContent='';
     refresh();
   }
   function link(data,type) { const url=URL.createObjectURL(new Blob([data],{type})); urls.push(url); return url; }
-  function render(name, product, grid, report, download, noRisk, rivers, container) {
+  function render(name, product, grid, report, download, noRisk, rivers, container, riverCells) {
     const label = labels[name], canvas = document.createElement('canvas');
     const {width,height} = grid.dimensions;
     canvas.width=width; canvas.height=height; canvas.setAttribute('role','img'); canvas.setAttribute('aria-label',label);
     const ctx=canvas.getContext('2d'), image=ctx.createImageData(width,height), names=palettes[name];
     const rgb=colors.map(hex=>[1,3,5].map(k=>parseInt(hex.slice(k,k+2),16)));
-    new Float32Array(product.values).forEach((v,i)=>{
+    let values = new Float32Array(product.values);
+    let filled = 0;
+    if (riverCells && el('fill-gaps').checked) {
+      ({ pixels: values, filled } = fillSmallMapGaps(values, width, height, riverCells, noRisk));
+    }
+    values.forEach((v,i)=>{
       if (!Number.isFinite(v)) {
         if (noRisk?.[i]) image.data.set([237, 241, 239, 180], i*4);
         return;
@@ -140,6 +147,7 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
       legend.append(item, 'Transparent = NoData');
     }
     appendRiverLegend(legend, rivers);
+    if (filled) legend.append(filled.toLocaleString() + ' cells filled for display');
     const caption=document.createElement('p'); caption.className='ee-help';
     const stats=report.frameworks[name.split('_')[0]];
     caption.textContent=stats ? stats.positiveCells.toLocaleString()+' positive risk cells · '+stats.applied+' classes' : 'Scaled within the study area';
@@ -152,17 +160,24 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
   function showResults(products, report, noRisk, rivers) {
     const downloads = Object.fromEntries(Object.entries(products).map(([name, product]) =>
       [name, link(product.tiff, 'image/tiff')]));
-    const draw = (name, target) => render(name, products[name], report.grid, report, downloads[name],
-      noRisk[name.split('_')[0]], rivers, target);
+    const hasRiver = rivers.length && window.proj4;
+    const riverCells = hasRiver ? mapRiverCells(report.grid, rivers) : null;
+    el('gap-control').hidden = false;
+    el('fill-gaps').disabled = !hasRiver;
+    if (!hasRiver) el('fill-gaps').checked = false;
+    const draw = (name, target, protectRiver) => render(name, products[name], report.grid, report, downloads[name],
+      noRisk[name.split('_')[0]], rivers, target, protectRiver ? riverCells : null);
 
-    for (const name of ['foen_class', 'adr7_class']) {
+    const classes = ['foen_class', 'adr7_class'].map(name => {
       const figure = document.createElement('figure'), title = document.createElement('h3');
       const output = document.createElement('div');
       title.textContent = labels[name];
       figure.append(title, output);
       el('maps').append(figure);
-      draw(name, output);
-    }
+      return () => draw(name, output, true);
+    });
+    redrawRiskClasses = () => classes.forEach(renderClass => renderClass());
+    redrawRiskClasses();
 
     for (const [title, names] of [
       ['Risk index', ['foen_risk', 'adr7_risk']],
@@ -207,6 +222,7 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     } catch(e) { if(job===active) el('status').textContent=e.message; }
     finally { active.worker?.terminate(); if(job===active){ job=null; refresh(); } }
   };
+  el('fill-gaps').onchange = () => redrawRiskClasses?.();
   el('method').onchange=el('bins').onchange=reset;
   el('cancel').onclick=()=>{reset();el('status').textContent='Calculation cancelled.';};
   return {reset,refresh};

@@ -1,4 +1,4 @@
-import { appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=river-maps';
+import { fillSmallMapGaps, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=gap-fill';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
   const size = width * height;
@@ -267,7 +267,11 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     const pixels = new ImageData(width, height);
     const legend = legends[type];
     const colors = new Map(legend?.map(([code, , hex]) => [code, fromHex(hex)]));
-    const values = new Float32Array(product.values);
+    let values = new Float32Array(product.values);
+    let filled = 0;
+    if (legend && field('fill-gaps').checked && result.riverCells) {
+      ({ pixels: values, filled } = fillSmallMapGaps(values, width, height, result.riverCells));
+    }
     const max = product.summary.max ?? 0;
     for (let i = 0; i < values.length; i++) {
       const value = values[i];
@@ -295,11 +299,16 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     const noData = document.createElement('span');
     noData.textContent = 'Transparent = NoData';
     legendNode.append(noData);
+    if (filled) legendNode.append(filled.toLocaleString() + ' cells filled for display');
     const { rivers } = result;
     appendRiverLegend(legendNode, rivers);
     const preview = canvas.closest('study-area-map')?.parentElement ?? canvas.parentElement;
     const stripeColor = type === 'danger' || type === 'matrix' ? fromHex('#f8de70') : undefined;
     showStudyArea(preview, result.report.grid, canvas, { rivers, stripeColor });
+  }
+  function drawOverview() {
+    drawLayer('foen_champion', field('foen-map'), field('foen-legend'));
+    drawLayer('adr7_envelope', field('adr-map'), field('adr-legend'));
   }
   function showLayer() {
     if (!result) return;
@@ -359,8 +368,12 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
       field('layer').replaceChildren(...names.map(name => new Option(productDescription(name)[0], name)));
       field('layer').value = 'adr7_envelope';
       field('results').hidden = false;
-      drawLayer('foen_champion', field('foen-map'), field('foen-legend'));
-      drawLayer('adr7_envelope', field('adr-map'), field('adr-legend'));
+      const hasRiver = result.rivers.length && window.proj4;
+      field('gap-control').hidden = false;
+      field('fill-gaps').disabled = !hasRiver;
+      if (!hasRiver) field('fill-gaps').checked = false;
+      if (hasRiver) result.riverCells = mapRiverCells(result.report.grid, result.rivers);
+      drawOverview();
       field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
         ' · Significant cells: ' + champion.depthCount.toLocaleString() + ' by depth, ' + champion.dvCount.toLocaleString() + ' by depth × velocity.';
       showLayer();
@@ -382,6 +395,11 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
   for (const name of ['source', 'mode', 'basis', 'clean']) field(name).addEventListener('change', invalidate);
   field('cancel').addEventListener('click', () => { invalidate(); status('Hazard processing cancelled.'); });
   field('layer').addEventListener('change', showLayer);
+  field('fill-gaps').addEventListener('change', () => {
+    if (!result) return;
+    drawOverview();
+    drawLayer(field('layer').value, field('canvas'), field('legend'));
+  });
   field('report').addEventListener('click', () => {
     if (!result) return;
     const link = document.createElement('a');
