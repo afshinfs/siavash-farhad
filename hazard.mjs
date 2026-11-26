@@ -1,3 +1,4 @@
+import { mapDownloads } from "./map-export.mjs";
 import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
@@ -254,6 +255,8 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     onChange();
     clearDownload();
     field('results').hidden = true;
+    field('foen-downloads').replaceChildren();
+    field('adr-downloads').replaceChildren();
     status('');
     queueMicrotask(refresh);
   }
@@ -310,6 +313,19 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
   function drawOverview() {
     drawLayer('foen_champion', field('foen-map'), field('foen-legend'));
     drawLayer('adr7_envelope', field('adr-map'), field('adr-legend'));
+  }
+  function showOverviewDownloads() {
+    for (const [key, product, title] of [
+      ['foen', 'foen_champion', 'FOEN danger'],
+      ['adr', 'adr7_envelope', 'ADR7 maximum class'],
+    ]) {
+      const canvas = field(key+'-map');
+      mapDownloads(field(key+'-downloads'), {
+        name: 'siavash_'+result.report.mode+'_'+product,
+        title, tiff: result.products[product].tiff, legend: field(key+'-legend'),
+        view: () => canvas.closest('study-area-map'),
+      });
+    }
   }
   function showLayer() {
     if (!result) return;
@@ -375,6 +391,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
       if (!hasRiver) field('fill-dry').checked = false;
       if (hasRiver) result.riverCells = mapRiverCells(result.report.grid, result.rivers);
       drawOverview();
+      showOverviewDownloads();
       field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
         ' · Significant cells: ' + champion.depthCount.toLocaleString() + ' by depth, ' + champion.dvCount.toLocaleString() + ' by depth × velocity.';
       showLayer();
@@ -410,5 +427,21 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     link.click();
     setTimeout(() => URL.revokeObjectURL(link.href), 1000);
   });
-  return { invalidate, refresh, getResult: () => result, closureChanged: () => field('mode').value !== 'baseline' ? invalidate() : queueMicrotask(refresh) };
+  function reportMaps() {
+    if (!result) return [];
+    const run = result.report;
+    return Object.keys(result.products).filter(name => name !== (run.champion.basis === 'dv' ? 'foen_dv_danger' : 'foen_depth_danger'))
+      .map(name => ({
+        title: name === 'foen_champion' ? 'FOEN danger' : productDescription(name)[0],
+        group: run.depthSource+' / '+run.mode,
+        render() {
+          const parent=document.createElement('div'), canvas=document.createElement('canvas'), legend=document.createElement('div');
+          legend.className='map-legend';
+          parent.append(canvas,legend);
+          drawLayer(name,canvas,legend);
+          return {view:parent.querySelector('study-area-map'),legend};
+        },
+      }));
+  }
+  return { invalidate, refresh, reportMaps, getResult: () => result, closureChanged: () => field('mode').value !== 'baseline' ? invalidate() : queueMicrotask(refresh) };
 }

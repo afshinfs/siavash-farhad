@@ -307,6 +307,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     overlay?.remove();
     overlay = null;
     field('results').hidden = true;
+    delete field('map').exportFeatures;
     status('');
     queueMicrotask(refresh);
   }
@@ -361,6 +362,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     refresh();
   }
   function showMap(features, bounds) {
+    field('map').exportFeatures = features;
     const L = window.L;
     field('map').hidden = !L;
     if (!L) return;

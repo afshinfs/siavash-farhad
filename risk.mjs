@@ -1,3 +1,4 @@
+import { mapDownloads } from "./map-export.mjs";
 import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
@@ -155,8 +156,14 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     caption.textContent=stats ? stats.positiveCells.toLocaleString()+' positive risk cells · '+stats.applied+' classes' : 'Scaled within the study area';
     const a=document.createElement('a'); a.href=download; a.download='farhad_'+report.mode+'_'+report.method+'_'+name+'.tif';
     a.textContent='Download GeoTIFF'; a.setAttribute('aria-label','Download '+label+' GeoTIFF');
-    container.replaceChildren(canvas,legend,caption,a);
+    const classMap = name === 'foen_class' || name === 'adr7_class';
+    const downloads = document.createElement('div');
+    container.replaceChildren(canvas,legend,caption,classMap ? downloads : a);
     showStudyArea(container,grid,canvas,{ rivers });
+    if (classMap) mapDownloads(downloads, {
+      name: a.download.slice(0,-4), title: label, tiff: product.tiff, legend,
+      view: () => canvas.closest('study-area-map'),
+    });
   }
 
   function showResults(products, report, noRisk, rivers) {

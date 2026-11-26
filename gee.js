@@ -1,8 +1,10 @@
-import { createRiskPanel } from './risk.mjs?v=patch-eight';
+import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs';
+import { exportMapImage, mapLegend } from './map-export.mjs';
+import { createRiskPanel } from './risk.mjs?v=export-report';
 import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=patch-eight';
-import { createHazardPanel } from './hazard.mjs?v=patch-eight';
+import { createHazardPanel } from './hazard.mjs?v=export-report';
 import { createMLStackPanel } from './ml-stack.mjs?v=automatic-folds';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=patch-eight';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=export-report';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=patch-eight';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
@@ -1053,6 +1055,25 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           ? writeFloatTIFF(Float32Array.from(raw, (value, i) => mask[i] ? value : NaN),
               t.width,t.height,t.dx,t.dy,t.origin,t.epsg,'nan') : null;
         self.postMessage({type:'prepared',dem,grid:{dimensions:{width:t.width,height:t.height},crsCode:'EPSG:'+t.epsg,affineTransform:{scaleX:t.dx,shearX:0,translateX:t.origin[0],shearY:0,scaleY:-t.dy,translateY:t.origin[1]}},bounds,validCells,sourceSHA256}, dem ? [dem] : []);return;
+      }
+      if (data.action === 'reportPreview') {
+        const t = await readGrid(data.buffer);
+        const values = await t.image.readRasters({samples:[0],interleave:true});
+        const nodata = t.image.getGDALNoData();
+        let min=Infinity,max=-Infinity;
+        for (const v of values) if (Number.isFinite(v) && v!==nodata) {min=Math.min(min,v);max=Math.max(max,v);}
+        if (!Number.isFinite(min)) throw Error('No valid data in the selected raster.');
+        const rgba=new Uint8ClampedArray(t.width*t.height*4);
+        for(let i=0;i<values.length;i++){
+          const v=values[i];
+          if(!Number.isFinite(v)||v===nodata) continue;
+          const f=min===max?.5:(v-min)/(max-min);
+          rgba.set([Math.round(224-195*f),Math.round(240-150*f),Math.round(249-118*f),255],i*4);
+        }
+        const grid={dimensions:{width:t.width,height:t.height},crsCode:'EPSG:'+t.epsg,
+          affineTransform:{scaleX:t.dx,scaleY:-t.dy,translateX:t.origin[0],translateY:t.origin[1]}};
+        self.postMessage({type:'complete',grid,min,max,rgba:rgba.buffer},[rgba.buffer]);
+        return;
       }
       if(data.action==='auditStack'){
         if(!template||!auditRasterStack)throw Error('Prepare a DEM before checking the raster stack.');
@@ -2640,6 +2661,69 @@ riskPanel.refresh();
 mlStackPanel.refresh();
 weaklinePanel.invalidate();
 hazardPanel.refresh();
+
+const reportGroups = [
+  ['01','Study area and elevation',['ee-title']],
+  ['02','Terrain and hydrology',['terrain-title','hydro-title']],
+  ['03','Predictors and exposure',['linear-title','sat-title','exp-title']],
+  ['04','GloFAS reference depths',['flood-title']],
+  ['05','Flood-depth models',['ml-stack-title']],
+  ['06','Weakline scenarios',['weakline-title']],
+  ['07','Flood hazard maps',['hazard-title']],
+  ['08','Flood risk maps',['risk-title']],
+].map(([number,title,ids])=>({number,title,sections:ids.map(id=>el(id).closest('section'))}));
+
+async function reportRasterPreview(source) {
+  const controller=new AbortController();
+  const code='('+satelliteWorkerMain.toString()+')(null,{},{})';
+  const url=URL.createObjectURL(new Blob([code],{type:'text/javascript'}));
+  let worker;
+  try {worker=new Worker(url);}
+  finally {URL.revokeObjectURL(url);}
+  try {
+    const buffer=source instanceof Blob ? await source.arrayBuffer() : source.slice(0);
+    return await callAlignedRasterWorker({worker,controller},{action:'reportPreview',buffer},'Report preview');
+  } finally {worker.terminate();}
+}
+
+const studyReport=createStudyReport({
+  groups:reportGroups,
+  readBounds:()=>grid && selected ? {...selected} : null,
+  getExtraOutputs:()=>{
+    const maps=[];
+    const candidates=weaklineOutput(el('weakline-map'));
+    if (candidates) maps.push(candidates);
+    for (const link of el('weakline-exports').querySelectorAll('a[download]')) {
+      maps.push(rasterPreviewOutput('06 · Weakline scenarios',link.download.replace(/\.tif$/,''),
+        async ()=>reportRasterPreview(await (await fetch(link.href)).blob()),'Depth (m)'));
+    }
+    if (linearVectors?.features.length) {
+      maps.push({section:'03 · Predictors and exposure',title:'Rivers and major roads',
+        image:bounds=>exportMapImage({vectors:linearVectors.features,
+          vectorColor:feature=>feature.properties.kind==='river' ? '#1686b6' : '#a65c00'},bounds),
+        legend:()=>[{label:'River',colors:['#1686b6']},{label:'Major road',colors:['#a65c00']}],
+      });
+    }
+    for (const item of hazardPanel.reportMaps()) {
+      let legend;
+      maps.push({...item,section:'07 · Flood hazard maps',
+        image:bounds=>{const rendered=item.render();legend=mapLegend(rendered.legend);return exportMapImage(rendered.view,bounds);},
+        legend:()=>legend,
+      });
+    }
+    const {dem,trainedDepths,referenceDepths}=mlStackPanel.getFloodAnalysisInputs();
+    if (dem && !el('ee-preview').querySelector('canvas')) maps.push(rasterPreviewOutput('01 · Study area and elevation','Local DEM',()=>reportRasterPreview(dem),'Elevation (m)'));
+    for (const [period,source] of Object.entries(trainedDepths ?? {})){
+      if (source) maps.push(rasterPreviewOutput('05 · Flood-depth models','XGBoost flood depth · '+period+' years',()=>reportRasterPreview(source),'Flood depth (m)'));
+    }
+    for (const [period,source] of Object.entries(referenceDepths ?? {})){
+      if (source instanceof File) maps.push(rasterPreviewOutput('04 · GloFAS reference depths','Local reference depth · '+period+' years',()=>reportRasterPreview(source),'Flood depth (m)'));
+    }
+    return maps;
+  },
+});
+window.addEventListener('study-report-open',studyReport.refresh);
+if (location.hash==='#study-report-panel') studyReport.refresh();
 
 // Keep the request independent of the worker so the failover rules can be tested.
 async function retrieveOverpass(query, mode, progress, fetchImpl = fetch, timeoutMs = 45000) {
