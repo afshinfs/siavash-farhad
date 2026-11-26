@@ -1,4 +1,4 @@
-import { fillSmallMapGaps, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=gap-fill';
+import { fillSmallMapGaps, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=gap-size';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
   const specs = { nightlights: [.25, true], builtup: [.2, false], population: [.25, false],
@@ -122,8 +122,9 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     const rgb=colors.map(hex=>[1,3,5].map(k=>parseInt(hex.slice(k,k+2),16)));
     let values = new Float32Array(product.values);
     let filled = 0;
-    if (riverCells && el('fill-gaps').checked) {
-      ({ pixels: values, filled } = fillSmallMapGaps(values, width, height, riverCells, noRisk));
+    const fillEnabled = riverCells && el('fill-gaps').checked;
+    if (fillEnabled) {
+      ({ pixels: values, filled } = fillSmallMapGaps(values, width, height, riverCells, noRisk, Number(el('gap-size').value)));
     }
     values.forEach((v,i)=>{
       if (!Number.isFinite(v)) {
@@ -147,7 +148,7 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
       legend.append(item, 'Transparent = NoData');
     }
     appendRiverLegend(legend, rivers);
-    if (filled) legend.append(filled.toLocaleString() + ' cells filled for display');
+    if (fillEnabled) legend.append(filled === 0 ? 'No eligible gaps to fill' : filled.toLocaleString() + ' cells filled for display');
     const caption=document.createElement('p'); caption.className='ee-help';
     const stats=report.frameworks[name.split('_')[0]];
     caption.textContent=stats ? stats.positiveCells.toLocaleString()+' positive risk cells · '+stats.applied+' classes' : 'Scaled within the study area';
@@ -165,6 +166,7 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     el('gap-control').hidden = false;
     el('fill-gaps').disabled = !hasRiver;
     if (!hasRiver) el('fill-gaps').checked = false;
+    el('gap-size').disabled = !el('fill-gaps').checked;
     const draw = (name, target, protectRiver) => render(name, products[name], report.grid, report, downloads[name],
       noRisk[name.split('_')[0]], rivers, target, protectRiver ? riverCells : null);
 
@@ -222,7 +224,11 @@ export function createRiskPanel({element, read, readRivers, rasterWorker, callWo
     } catch(e) { if(job===active) el('status').textContent=e.message; }
     finally { active.worker?.terminate(); if(job===active){ job=null; refresh(); } }
   };
-  el('fill-gaps').onchange = () => redrawRiskClasses?.();
+  el('fill-gaps').onchange = () => {
+    el('gap-size').disabled = !el('fill-gaps').checked;
+    redrawRiskClasses?.();
+  };
+  el('gap-size').onchange = () => redrawRiskClasses?.();
   el('method').onchange=el('bins').onchange=reset;
   el('cancel').onclick=()=>{reset();el('status').textContent='Calculation cancelled.';};
   return {reset,refresh};

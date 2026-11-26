@@ -30,7 +30,7 @@ export function mapRiverCells(grid, rivers) {
   return Uint8Array.from({ length: width * height }, (_, i) => Number(rgba[4 * i + 3] > 0));
 }
 
-export function fillSmallMapGaps(values, width, height, riverCells, noRisk) {
+export function fillSmallMapGaps(values, width, height, riverCells, noRisk, maxCells = 3) {
   const visited = new Uint8Array(values.length);
   const isGap = i => Number.isNaN(values[i]) && !noRisk?.[i];
   let pixels = values;
@@ -49,10 +49,12 @@ export function fillSmallMapGaps(values, width, height, riverCells, noRisk) {
           const j = row * width + col;
           if (riverCells[j]) excluded = true;
           if (isGap(j)) {
+            // In the larger-gap mode a corner contact does not open a gap to the edge.
+            if (maxCells > 3 && x !== col && y !== row) continue;
             if (!visited[j]) {
               visited[j] = 1;
               gap.push(j);
-              if (gap.length > 3) excluded = true;
+              if (gap.length > maxCells) excluded = true;
             }
           } else if (!excluded) boundary.add(j);
         }

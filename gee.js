@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs?v=gap-fill';
-import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=gap-fill';
-import { createHazardPanel } from './hazard.mjs?v=gap-fill';
+import { createRiskPanel } from './risk.mjs?v=gap-size';
+import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=gap-size';
+import { createHazardPanel } from './hazard.mjs?v=gap-size';
 import { createMLStackPanel } from './ml-stack.mjs?v=automatic-folds';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=gap-fill';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=gap-fill';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=gap-size';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=gap-size';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
