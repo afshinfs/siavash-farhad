@@ -1,4 +1,4 @@
-import { fillSmallMapGaps, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=gap-size';
+import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=dry-patches';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
 export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
   const size = width * height;
@@ -269,9 +269,9 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     const colors = new Map(legend?.map(([code, , hex]) => [code, fromHex(hex)]));
     let values = new Float32Array(product.values);
     let filled = 0;
-    const fillEnabled = legend && field('fill-gaps').checked && result.riverCells;
+    const fillEnabled = legend && field('fill-dry').checked && result.riverCells;
     if (fillEnabled) {
-      ({ pixels: values, filled } = fillSmallMapGaps(values, width, height, result.riverCells, undefined, Number(field('gap-size').value)));
+      ({ pixels: values, filled } = fillDryPatches(values, width, height, result.riverCells));
     }
     const max = product.summary.max ?? 0;
     for (let i = 0; i < values.length; i++) {
@@ -300,7 +300,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
     const noData = document.createElement('span');
     noData.textContent = 'Transparent = NoData';
     legendNode.append(noData);
-    if (fillEnabled) legendNode.append(filled === 0 ? 'No eligible gaps to fill' : filled.toLocaleString() + ' cells filled for display');
+    if (fillEnabled) legendNode.append(filled === 0 ? 'No eligible dry patches to fill' : filled.toLocaleString() + (filled === 1 ? ' dry cell filled for display' : ' dry cells filled for display'));
     const { rivers } = result;
     appendRiverLegend(legendNode, rivers);
     const preview = canvas.closest('study-area-map')?.parentElement ?? canvas.parentElement;
@@ -370,10 +370,9 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
       field('layer').value = 'adr7_envelope';
       field('results').hidden = false;
       const hasRiver = result.rivers.length && window.proj4;
-      field('gap-control').hidden = false;
-      field('fill-gaps').disabled = !hasRiver;
-      if (!hasRiver) field('fill-gaps').checked = false;
-      field('gap-size').disabled = !field('fill-gaps').checked;
+      field('dry-control').hidden = false;
+      field('fill-dry').disabled = !hasRiver;
+      if (!hasRiver) field('fill-dry').checked = false;
       if (hasRiver) result.riverCells = mapRiverCells(result.report.grid, result.rivers);
       drawOverview();
       field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
@@ -397,14 +396,12 @@ export function createHazardPanel({ element, readInputs, readScenarios, readRive
   for (const name of ['source', 'mode', 'basis', 'clean']) field(name).addEventListener('change', invalidate);
   field('cancel').addEventListener('click', () => { invalidate(); status('Hazard processing cancelled.'); });
   field('layer').addEventListener('change', showLayer);
-  function refreshGapDisplay() {
-    field('gap-size').disabled = !field('fill-gaps').checked;
+  function refreshDryDisplay() {
     if (!result) return;
     drawOverview();
     drawLayer(field('layer').value, field('canvas'), field('legend'));
   }
-  field('fill-gaps').addEventListener('change', refreshGapDisplay);
-  field('gap-size').addEventListener('change', refreshGapDisplay);
+  field('fill-dry').addEventListener('change', refreshDryDisplay);
   field('report').addEventListener('click', () => {
     if (!result) return;
     const link = document.createElement('a');

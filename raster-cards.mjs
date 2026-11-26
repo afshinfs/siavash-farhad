@@ -30,41 +30,47 @@ export function mapRiverCells(grid, rivers) {
   return Uint8Array.from({ length: width * height }, (_, i) => Number(rgba[4 * i + 3] > 0));
 }
 
-export function fillSmallMapGaps(values, width, height, riverCells, noRisk, maxCells = 3) {
-  const visited = new Uint8Array(values.length);
-  const isGap = i => Number.isNaN(values[i]) && !noRisk?.[i];
+export function fillDryPatches(values, width, height, riverCells) {
   let pixels = values;
   let filled = 0;
+  // A patch includes dry cells that meet along an edge or at a corner.
   for (let start = 0; start < values.length; start++) {
-    if (visited[start] || !isGap(start)) continue;
-    const gap = [start];
+    if (values[start] !== 0) continue;
+    const patch = new Set([start]);
     const boundary = new Set();
-    let excluded = false;
-    visited[start] = 1;
-    for (const i of gap) {
+    let enclosed = true;
+    scan: for (const i of patch) {
       const x = i % width, y = Math.floor(i / width);
-      if (riverCells[i] || x === 0 || x === width - 1 || y === 0 || y === height - 1) excluded = true;
-      for (let row = Math.max(0, y - 1); row <= Math.min(height - 1, y + 1); row++) {
-        for (let col = Math.max(0, x - 1); col <= Math.min(width - 1, x + 1); col++) {
+      if (x === 0 || x === width - 1 || y === 0 || y === height - 1) {
+        enclosed = false;
+        break;
+      }
+      for (let row = y - 1; row <= y + 1; row++) {
+        for (let col = x - 1; col <= x + 1; col++) {
           const j = row * width + col;
-          if (riverCells[j]) excluded = true;
-          if (isGap(j)) {
-            // In the larger-gap mode a corner contact does not open a gap to the edge.
-            if (maxCells > 3 && x !== col && y !== row) continue;
-            if (!visited[j]) {
-              visited[j] = 1;
-              gap.push(j);
-              if (gap.length > maxCells) excluded = true;
+          const value = values[j];
+          if (riverCells[j] || !Number.isFinite(value)) {
+            enclosed = false;
+            break scan;
+          }
+          if (value === 0) {
+            patch.add(j);
+            // Only the first cell counts the patch. Stop scanning upon finding a third dry cell.
+            if (j < start || patch.size > 2) {
+              enclosed = false;
+              break scan;
             }
-          } else if (!excluded) boundary.add(j);
+          } else {
+            boundary.add(j);
+          }
         }
       }
     }
-    if (excluded) continue;
+    if (!enclosed) continue;
     const counts = new Map();
     for (const j of boundary) {
-      const value = noRisk?.[j] ? 0 : values[j];
-      if (Number.isFinite(value)) counts.set(value, (counts.get(value) || 0) + 1);
+      const value = values[j];
+      counts.set(value, (counts.get(value) || 0) + 1);
     }
     let winner = 0, best = 0, tied = false;
     for (const [value, count] of counts) {
@@ -74,10 +80,10 @@ export function fillSmallMapGaps(values, width, height, riverCells, noRisk, maxC
         tied = false;
       } else if (count === best) tied = true;
     }
-    if (winner <= 0 || tied) continue;
+    if (tied || winner <= 0) continue;
     if (pixels === values) pixels = values.slice();
-    for (const i of gap) pixels[i] = winner;
-    filled += gap.length;
+    for (const i of patch) pixels[i] = winner;
+    filled += patch.size;
   }
   return { pixels, filled };
 }
