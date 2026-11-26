@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Browser Prototype</title><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="workflow.css?v=river-maps"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=patch-eight"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>SIAVASH &amp; FARHAD · Flood Hazard and Risk WebGIS</title><meta name="description" content="Explore browser-based flood hazard and risk screening with SIAVASH and FARHAD."><link rel="stylesheet" href="overview.css"><link rel="stylesheet" href="style.css"><link rel="stylesheet" href="workflow.css?v=river-maps"><script type="module" src="app.js"></script><script type="module" src="gee.js?v=patch-eight"></script><link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
 <style>
 .ee-panel{margin-bottom:28px}.ee-panel .eyebrow{margin-bottom:10px}.ee-layout{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(250px,1fr);gap:26px;margin-top:26px}#ee-map{height:330px;background:#eef3ee;border-radius:8px;border:1px solid #d4dfd6;z-index:0}.ee-map-actions{margin-top:12px}.ee-controls h3,.ee-connection h3,.ee-output h3{font-size:15px;margin:0 0 10px}.ee-help{color:#5e7569;font-size:12px;line-height:1.75}.ee-bounds,.ee-fields{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}label{display:flex;flex-direction:column;gap:7px;font-size:11px;font-weight:600;color:#496258;min-width:0}input{width:100%;min-width:0;padding:11px;border:1px solid #c9d8cd;border-radius:6px;background:#fff;color:#22473e;font:inherit;font-size:13px}input:focus-visible{outline:3px solid #c5ddcf;outline-offset:1px}.ee-connection{border-top:1px solid #e0e8e2;margin-top:26px;padding-top:24px}.ee-connection .ee-help{max-width:700px}.ee-fields{margin:16px 0}.ee-setup{margin:0 0 20px;padding:0 0 16px;border-top:0;border-bottom:1px solid #e0e8e2;font-size:12px;line-height:1.9}.ee-setup ol{padding-left:21px;color:#536e5f}.ee-setup code{background:#edf3ec;padding:2px 5px;overflow-wrap:anywhere}.ee-message{font-size:12px;line-height:1.8;background:#eff5ef;padding:13px 16px;border-radius:6px}.ee-message.error{color:#9c3525;background:#fcf0eb}.ee-output{display:grid;grid-template-columns:1fr 220px;gap:24px;border-top:1px solid #e0e8e2;margin-top:22px;padding-top:22px}#ee-preview canvas{width:100%;height:auto;max-height:220px;object-fit:contain;background:#edf3ee;image-rendering:pixelated;border-radius:6px}.engine-panel{margin-top:24px}#ee-state{font-size:12px;border-radius:20px;padding:8px 12px;background:#edf4ef;white-space:nowrap}.leaflet-container{font-family:inherit}.leaflet-control-attribution a{font-size:10px}
 @media(max-width:720px){.ee-layout{grid-template-columns:1fr;gap:20px}.ee-fields{grid-template-columns:1fr}.ee-output{grid-template-columns:1fr}#ee-preview{max-width:260px}#ee-map{height:280px}}
@@ -33,8 +33,37 @@ study-area-map > canvas:not([hidden]){position:absolute;inset:0;width:100%;heigh
 .map-legend i,.hazard-swatch{width:14px;height:14px;border:1px solid #64766c;vertical-align:middle}.ee-layout #ee-map{height:clamp(330px,48vh,500px)}
 </style>
 </head>
-<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><span class="badge">RESEARCH PROTOTYPE</span></header>
-<main><div class="workflow-layout">
+<body><header><a href="./" class="brand">SIAVASH &amp; FARHAD<span>FLOOD HAZARD &amp; RISK</span></a><nav class="overview-nav" aria-label="Site"><a id="overview-link" href="#overview">Overview</a><a class="overview-primary" href="#engine-panel">Open WebGIS</a></nav></header>
+<main>
+<section id="overview" class="overview" aria-labelledby="overview-title" hidden>
+  <div class="overview-hero">
+    <div class="overview-copy">
+      <h1 id="overview-title">Map flood hazard and risk in your browser</h1>
+      <p>SIAVASH &amp; FARHAD is a research WebGIS for flood screening in data-scarce regions. Define a study area, compare flood scenarios, and export hazard and risk maps for further analysis.</p>
+      <div class="overview-actions">
+        <a class="overview-primary" href="#engine-panel">Open WebGIS</a>
+        <a href="#ee-title">View example study areas</a>
+      </div>
+    </div>
+    <figure class="overview-map">
+      <img src="hazard-overview.png" width="800" height="536" alt="Illustrative flood hazard map with a narrow high-hazard corridor and lower hazard classes farther from the river">
+      <figcaption><span>Illustrative ADR7 hazard map</span><span class="overview-legend" aria-label="ADR7 classes H1 through H6">H1 <i style="background:#94d1ae"></i><i style="background:#e2d46e"></i><i style="background:#efa65a"></i><i style="background:#e47052"></i><i style="background:#b63f62"></i><i style="background:#69204b"></i> H6</span></figcaption>
+    </figure>
+  </div>
+  <div class="overview-block">
+    <h2>From study area to flood screening</h2>
+    <div class="overview-grid">
+      <article><h3>Build the inputs</h3><p>Choose a study area and assemble elevation, terrain, drainage, river, land-cover and exposure layers on a common grid.</p></article>
+      <article><h3>Compare hazard scenarios</h3><p>Use GloFAS reference depths or XGBoost estimates. Explore baseline conditions and potential weak-line closures, then compare FOEN and ADR7 hazard classes.</p></article>
+      <article><h3>Map and export risk</h3><p>Combine flood hazard with exposure and vulnerability. Download GeoTIFFs and run reports for use in GIS and further assessment.</p></article>
+    </div>
+    <div class="overview-notes">
+      <p><strong>Getting started.</strong> Run the browser checks, then draw a study area or pick the Aqqala or Poldokhtar example. Live Earth Engine retrieval requires your own configured account.</p>
+      <p><strong>Intended use.</strong> The WebGIS supports research and preliminary flood screening. Site-specific engineering decisions require independent assessment.</p>
+    </div>
+  </div>
+</section>
+<div class="workflow-layout" hidden>
 
 <nav class="workflow-tabs" aria-label="WebGIS workflow"><a href="#engine-panel"><span>00</span>Browser checks</a><a href="#ee-title"><span>01</span>Study area &amp; elevation</a><a href="#terrain-title"><span>02</span>Terrain &amp; hydrology</a><a href="#linear-title"><span>03</span>Predictors &amp; exposure</a><a href="#flood-title"><span>04</span>GloFAS reference depths</a><a href="#ml-stack-title"><span>05</span>Flood-depth models</a><a href="#weakline-panel"><span>06</span>Weakline scenarios</a><a href="#hazard-panel"><span>07</span>Flood hazard maps</a><a href="#risk-panel"><span>08</span>Flood risk maps</a></nav>
 <div class="workflow-content">
@@ -451,6 +480,12 @@ const groups = [
 ].map(ids => ids.map(id => document.getElementById(id).closest('section')));
 const tabs = [...document.querySelectorAll('.workflow-tabs a')];
 function showWorkflow() {
+  const showOverview = !location.hash || location.hash === '#overview';
+  document.getElementById('overview').hidden = !showOverview;
+  document.querySelector('.workflow-layout').hidden = showOverview;
+  const overviewLink = document.getElementById('overview-link');
+  if (showOverview) overviewLink.setAttribute('aria-current', 'page');
+  else overviewLink.removeAttribute('aria-current');
   const target = document.getElementById(location.hash.slice(1));
   const matching = groups.findIndex(group => group.some(panel => target && panel.contains(target)));
   const selected = matching < 0 ? 0 : matching;
