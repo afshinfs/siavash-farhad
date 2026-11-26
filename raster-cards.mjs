@@ -1,10 +1,11 @@
 // Reproject the display pixels to Web Mercator. The source canvas and exported
 // GeoTIFF retain the native grid. Nearest-neighbour keeps categorical colours.
-function rasterImage(canvas, grid, projection, [west, south, east, north]) {
+function rasterImage(canvas, grid, projection, [west, south, east, north], stripeColor) {
   const source = canvas.getContext('2d').getImageData(0, 0, canvas.width, canvas.height);
   const image = document.createElement('canvas');
-  image.width = Math.min(1024, canvas.width * 2);
-  image.height = Math.min(1024, canvas.height * 2);
+  const scale = stripeColor ? Math.max(4, 384 / Math.max(canvas.width, canvas.height)) : 2;
+  image.width = Math.min(1024, Math.ceil(canvas.width * scale));
+  image.height = Math.min(1024, Math.ceil(canvas.height * scale));
   const context = image.getContext('2d');
   const target = context.createImageData(image.width, image.height);
   const t = grid.affineTransform || grid.transform;
@@ -17,7 +18,12 @@ function rasterImage(canvas, grid, projection, [west, south, east, north]) {
       const j = Math.floor((northing - t.translateY) / t.scaleY);
       if (i < 0 || i >= canvas.width || j < 0 || j >= canvas.height) continue;
       const offset = (j * canvas.width + i) * 4;
-      target.data.set(source.data.subarray(offset, offset + 4), (row * image.width + col) * 4);
+      const rgba = source.data.subarray(offset, offset + 4);
+      const pixel = (row * image.width + col) * 4;
+      if (stripeColor && rgba[3] && stripeColor.every((value, channel) => rgba[channel] === value)) {
+        const white = (row + col) % 8 < 4;
+        target.data.set(white ? [255, 255, 255, 255] : [...stripeColor, 255], pixel);
+      } else target.data.set(rgba, pixel);
     }
   }
   context.putImageData(target, 0, 0);
@@ -43,6 +49,9 @@ class StudyAreaMap extends HTMLElement {
     this.map?.remove();
     this.map = null;
     this.overlay = null;
+    this.riverLayer = null;
+    this.drawnRivers = null;
+    this.dirty = true;
   }
 
   render() {
@@ -68,10 +77,20 @@ class StudyAreaMap extends HTMLElement {
         maxNativeZoom: 19, maxZoom: 22,
         attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
       }).addTo(this.map);
-      L.polygon(points, { color: '#243e4a', weight: 2, fill: false, interactive: false }).addTo(this.map);
+      this.map.createPane('river-lines').style.zIndex = '450';
+      this.map.createPane('study-outline').style.zIndex = '460';
+      L.polygon(points, { pane: 'study-outline', color: '#243e4a', weight: 2, fill: false, interactive: false }).addTo(this.map);
       this.map.fitBounds(L.latLngBounds(points), { padding: [20, 20], maxZoom: 19 });
     }
     this.map.invalidateSize({ pan: false });
+    if (this.rivers !== this.drawnRivers) {
+      this.riverLayer?.remove();
+      this.riverLayer = this.rivers?.length ? L.geoJSON(this.rivers, {
+        pane: 'river-lines', interactive: false,
+        style: { color: '#1686b6', weight: 3, opacity: 0.95 },
+      }).addTo(this.map) : null;
+      this.drawnRivers = this.rivers;
+    }
     if (!canvas || !this.dirty) return;
 
     const [west, south, east, north] = extent;
@@ -79,7 +98,7 @@ class StudyAreaMap extends HTMLElement {
       L.CRS.EPSG3857.unproject(L.point(west, south)),
       L.CRS.EPSG3857.unproject(L.point(east, north)),
     ]);
-    const url = rasterImage(canvas, grid, projection, extent);
+    const url = rasterImage(canvas, grid, projection, extent, this.stripeColor);
     if (this.overlay) this.overlay.setUrl(url);
     else this.overlay = L.imageOverlay(url, bounds, { opacity: 0.83, className: 'study-area-raster' }).addTo(this.map);
     canvas.hidden = true;
@@ -89,7 +108,7 @@ class StudyAreaMap extends HTMLElement {
 
 customElements.define('study-area-map', StudyAreaMap);
 
-export function showStudyArea(parent, grid, canvas = parent.querySelector(':scope > canvas')) {
+export function showStudyArea(parent, grid, canvas = parent.querySelector(':scope > canvas'), { rivers = null, stripeColor } = {}) {
   let view = parent.querySelector(':scope > study-area-map');
   if (view && view.grid !== grid) {
     if (canvas && view.contains(canvas)) {
@@ -109,8 +128,19 @@ export function showStudyArea(parent, grid, canvas = parent.querySelector(':scop
     } else parent.append(view);
   }
   view.canvas = canvas;
+  view.rivers = rivers;
+  view.stripeColor = stripeColor;
+  view.setAttribute('aria-label', canvas?.getAttribute('aria-label') || 'Study area');
   view.dirty = true;
   if (view.map) view.render();
+}
+
+export function appendRiverLegend(legend, rivers) {
+  if (!rivers?.length) return;
+  const item = document.createElement('span'), swatch = document.createElement('i');
+  swatch.className = 'river-legend-line';
+  item.append(swatch, 'River');
+  legend.append(item);
 }
 
 const worldCover = [

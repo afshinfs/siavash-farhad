@@ -1,4 +1,4 @@
-import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=map-legends';
+import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=river-maps';
 // Runs in the aligned raster worker. Raster vertices use DEM grid coordinates.
 export function screenWeaklines({ width, height, dx, corridor, depthByPeriod, thresholdM, minimumM }) {
   const periods = Object.keys(depthByPeriod).map(Number).sort((a, b) => a - b);
@@ -128,7 +128,7 @@ export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth,
       });
     }
     return Float32Array.from(surface, (value, i) =>
-      valid[i] && !barrier[i] ? Math.min(cap, Math.max(0, value - terrain[i])) : NaN);
+      !valid[i] ? NaN : closed && barrier[i] ? 0 : Math.min(cap, Math.max(0, value - terrain[i])));
   }
   const closure = route(true);
   if (scenarioOnly) return closure;
@@ -139,7 +139,7 @@ export function compareWeaklineClosure({ width, height, dx, terrain, inputDepth,
   const wet = Math.fround(0.05);
   for (let i = 0; i < n; i++) {
     if (barrier[i]) excludedBarrierCells++;
-    if (!Number.isFinite(baseline[i])) continue;
+    if (barrier[i] || !Number.isFinite(baseline[i])) continue;
     comparedCells++;
     const delta = closure[i] - baseline[i];
     difference[i] = delta;
@@ -192,8 +192,7 @@ export function runWeaklineScenarios({ candidates, inputDepth, terrain, riverDis
       return;
     }
     const routed = route({ width, height, terrain, inputDepth, riverDistance, barrierCells: cells, cap, scenarioOnly: true });
-    // Retain open depths where closure routing does not report a value,
-    // including the artificial barrier footprint. Score each on the same grid.
+    // Keep open depth outside the routable terrain, where it exists.
     const depth = routed.map((value, i) => Number.isFinite(value) ? value : inputDepth[i]);
     for (let i = 0; i < depth.length; i++) if (depth[i] > envelope[i]) envelope[i] = depth[i];
     const row = { closed: lines.map(line => line.id), score: score(depth) };
@@ -487,10 +486,10 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     });
     if (!output) return;
     batchOutput = { ...output, predicted, demSHA256: output.prepared.sourceSHA256,
-      report: { ...output.report, method: exhaustive ? 'Exhaustive' : 'Desktop-style bounded search',
+      report: { ...output.report, method: exhaustive ? 'All open and closed combinations' : 'Limited combinations',
         screening: result.report } };
     field('batch-metric').textContent = 'Ranking uses ' + batchOutput.report.metric +
-      '. Open depths fill artificial barrier cells for comparable scoring.';
+      '. Closed weakline cells have zero depth in each closure scenario.';
     field('batch-rows').replaceChildren(...batchOutput.report.periods.map(row => {
       const tr = document.createElement('tr');
       for (const value of [row.period, row.eligible.length, row.totalPossible, row.tested,

@@ -1,9 +1,9 @@
-import { createRiskPanel } from './risk.mjs?v=map-legends';
-import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=map-legends';
-import { createHazardPanel } from './hazard.mjs?v=map-legends';
-import { createMLStackPanel } from './ml-stack.mjs?v=reference-support';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=map-legends';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=automatic-dry-depth';
+import { createRiskPanel } from './risk.mjs?v=river-maps';
+import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=river-maps';
+import { createHazardPanel } from './hazard.mjs?v=river-maps';
+import { createMLStackPanel } from './ml-stack.mjs?v=automatic-folds';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=closure-mask';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=river-maps';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -219,7 +219,7 @@ function inspectRaster(buffer,expected) {
       for(const v of values)if(Number.isFinite(v)&&(nodata===null||v!==nodata)){count++;sum+=v;min=Math.min(min,v);max=Math.max(max,v);}
       if(!count)throw new Error('No valid SRTM elevation cells were returned for this area.');
       const rgba=new Uint8ClampedArray(width*height*4);
-      for(let i=0;i<values.length;i++){const v=values[i];if(!Number.isFinite(v)||(nodata!==null&&v===nodata))continue;const x=max===min?0.5:(v-min)/(max-min);rgba.set([Math.round(48+175*x),Math.round(90+122*x),Math.round(82+90*x),215],i*4);}
+      for(let i=0;i<values.length;i++){const v=values[i];if(!Number.isFinite(v)||(nodata!==null&&v===nodata))continue;const x=max===min?0.5:(v-min)/(max-min);rgba.set([Math.round(40+190*x),Math.round(87+137*x),Math.round(82+80*x),255],i*4);}
       self.postMessage({ok:true,summary:{width,height,crs:data.grid.crsCode,resolutionMetres:30,nodata,validCells:count,minElevationM:min,maxElevationM:max,meanElevationM:sum/count},rgba:rgba.buffer},[rgba.buffer]);
     }catch(error){self.postMessage({ok:false,error:error.message});}};
   `;
@@ -238,7 +238,7 @@ function drawElevation(data,requestedGrid) {
   canvas.getContext('2d').putImageData(new ImageData(new Uint8ClampedArray(data.rgba),width,height),0,0);
   el('ee-preview').replaceChildren(canvas);canvas.setAttribute('aria-label','SRTM elevation preview; relative elevation colours');
   showStudyArea(el('ee-preview'), requestedGrid);
-  el('ee-preview').append(rangeLegend(data.summary.minElevationM,data.summary.maxElevationM,'Elevation (m)','#305a52','#dfd4ac'));
+  el('ee-preview').append(rangeLegend(data.summary.minElevationM,data.summary.maxElevationM,'Elevation (m)'));
   // Keep the preview in its native UTM grid. Avoid draping a UTM image on a
   // latitude/longitude rectangle without reprojection.
 }
@@ -1078,14 +1078,14 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           try { layers[name] = await readAlignedValues(raster,true); }
           catch(error) { throw Error(name+' · '+error.message); }
         }
-        const {rasters,...report} = computeRisk({...data,layers,width,mask});
-        const products = {}, transfer = [];
+        const {rasters,noRisk,...report} = computeRisk({...data,layers,width,mask});
+        const products = {}, transfer = Object.values(noRisk).map(values => values.buffer);
         for (const [name,values] of Object.entries(rasters)) {
           const tiff = writeFloatTIFF(values,width,height,dx,dy,origin,epsg,'nan');
           products[name] = {tiff,values:values.buffer};
           transfer.push(tiff,values.buffer);
         }
-        self.postMessage({...report,products},transfer);
+        self.postMessage({...report,products,noRisk},transfer);
         return;
       }
       if (data.action === 'hazard') {
@@ -1107,13 +1107,17 @@ function satelliteWorkerMain(deriveSatelliteLayers,manningLookup,soilGroupLookup
           if (values.some(value => value < 0)) throw Error(period + '-year depth contains negative values.');
           depths[period] = values;
         }
+        const referenceDepths = {};
+        for (const [period, buffer] of Object.entries(data.referenceDepths ?? {})) {
+          referenceDepths[period] = await readAlignedValues(buffer, true);
+        }
         const scenarioDepths = {};
         for (const [period, buffer] of Object.entries(data.scenarios ?? {})) {
           scenarioDepths[period] = await read(buffer, period + '-year scenario depth');
         }
         const { rasters, coverage, champion } = computeHazards({
-          width, height, periods: data.periods, depths, slope, manning, scenarioDepths,
-          mode: data.mode, basis: data.basis, clean: data.clean,
+          width, height, periods: data.periods, depths, slope, manning, scenarioDepths, referenceDepths,
+          basis: data.basis, clean: data.clean,
         });
         const products = {}, transfer = [];
         for (const [name, values] of Object.entries(rasters)) {
@@ -2602,8 +2606,12 @@ const weaklinePanel = createWeaklinePanel({
   rasterWorker: satelliteWorkerMain,
   callWorker: callAlignedRasterWorker,
 });
+function riverFeatures() {
+  return linearVectors?.features.filter(feature => feature.properties?.kind === 'river') ?? [];
+}
 const hazardPanel = createHazardPanel({
   element: el,
+  readRivers: riverFeatures,
   readInputs: () => mlStackPanel.getFloodAnalysisInputs(),
   onChange: () => queueMicrotask(() => riskPanel.reset()),
   readScenarios: () => weaklinePanel.getScenarios(),
@@ -2622,6 +2630,7 @@ const mlStackPanel = createMLStackPanel({
 });
 const riskPanel = createRiskPanel({
   element: el, rasterWorker: satelliteWorkerMain, callWorker: callAlignedRasterWorker,
+  readRivers: riverFeatures,
   read: () => {
     const { dem, riskLayers: layers, buildingSource } = mlStackPanel.getFloodAnalysisInputs();
     return {dem,layers,buildingSource,hazard:hazardPanel.getResult()};

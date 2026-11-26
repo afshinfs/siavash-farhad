@@ -103,3 +103,21 @@
   .workflow-tabs {display:grid;grid-template-columns:repeat(2,minmax(0,1fr));overflow:visible}
   .workflow-tabs a {white-space:normal;padding:7px;line-height:1.3}
 }
+
+.workflow-content .output-stack { grid-template-columns: minmax(0, 1fr); }
+.workflow-content #ee-preview { max-width: none; }
+.workflow-content .wide-map study-area-map { height: 300px; }
+.hazard-maps.wide-map > figure { padding: 0; border: 0; background: transparent; }
+.workflow-content .risk-layer-grid {
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+}
+.map-legend .river-legend-line {
+  width: 16px;
+  height: 3px;
+  background: #1686b6;
+  border: 0;
+  vertical-align: middle;
+}
+.map-legend .residual-swatch {
+  background: repeating-linear-gradient(135deg, #f8de70 0 3px, white 3px 6px);
+}

@@ -14,7 +14,8 @@ const riskExtras = ["nightlights","builtup_fraction","population_density","build
 function localLayerName(filename) {
   const name = filename.toLowerCase().replace(/\.tiff?$/, '').replace(/_aligned$/, '');
   const period = name.match(/^flood_(30|100|300|1000)yr$/);
-  if (period) return 'RP' + period[1] + '_depth';
+  const reference = period ?? name.match(/^rp(30|100|300|1000)_depth$/);
+  if (reference) return 'RP' + reference[1] + '_depth';
   if (/^manning_(2020|2021)$/.test(name)) return 'manning';
   if (/^spi(?:3m_[0-9]{6})?$/.test(name)) return 'spi_proxy';
   return ({ hand: 'merit_hnd', hsg: 'hsg_proxy' })[name] ?? name;
@@ -97,25 +98,28 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     field('status').textContent = text;
     field('status').classList.toggle('error', error);
   }
+  function eligibleCount(spatial) {
+    if (!report?.passed) return null;
+    return Math.min(...report.targetResults.map(target => spatial ? target.occupiedBlocks : target.usableCells));
+  }
+
   function refresh() {
     const { dem } = readSession();
     field('source').textContent = localDEM ? 'Local DEM · ' + localDEM.name
       : dem ? 'Using the current WebGIS DEM.' : 'Retrieve a DEM above or open a local DEM here.';
     const spatial = field('cv-mode').value === 'block';
-    const foldCount = spatial ? Number(field('folds').value) : 5;
-    const required = report?.passed
-      ? Math.min(...report.targetResults.map(target => spatial ? target.occupiedBlocks : target.usableCells)) : null;
+    const occupied = eligibleCount(spatial);
+    const folds = occupied === null ? null : spatial ? Math.min(5, occupied) : 5;
+    const minimum = spatial ? 2 : 5;
     field('cv-mode').disabled = Boolean(current);
-    field('fold-options').hidden = !spatial;
-    field('folds').disabled = Boolean(current) || !spatial;
-    field('train').disabled = Boolean(current) || required === null || required < foldCount;
-    const unit = spatial ? 'occupied blocks' : 'eligible cells';
+    field('train').disabled = Boolean(current) || occupied === null || occupied < minimum;
     let requirement = 'Pass the raster-stack check before training.';
-    if (required !== null) {
-      requirement = required >= foldCount
-        ? 'All return periods meet the ' + foldCount + '-fold requirement.'
-        : 'Each return period needs at least ' + foldCount + ' ' + unit +
-          '. The lowest count is ' + required + '.';
+    if (occupied !== null) {
+      const unit = spatial ? 'occupied blocks' : 'eligible cells';
+      requirement = occupied < minimum
+        ? 'Each return period needs at least ' + minimum + ' ' + unit + '. The lowest count is ' + occupied + '.'
+        : spatial ? folds + ' spatial folds selected automatically. The lowest count across return periods is ' + occupied + ' occupied blocks.'
+          : 'All return periods meet the five-fold pixel validation requirement.';
     }
     field('fold-requirement').textContent = requirement;
     field('run').disabled = Boolean(current) || !(localDEM || dem);
@@ -257,13 +261,13 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     clearTraining();
     const { dem, entries } = checkedInputs;
     const cvMode = field('cv-mode').value;
-    const foldCount = cvMode === 'block' ? Number(field('folds').value) : 5;
+    const foldCount = cvMode === 'block' ? Math.min(5, eligibleCount(true)) : 5;
     const job = { controller: new AbortController(), worker: null, training: true };
     current = job;
     refresh();
     trainingMessage('Preparing the checked raster inputs…');
     try {
-      const worker = new Worker(new URL('./depth-training-worker.js?v=reference-support', import.meta.url), { type: 'module' });
+      const worker = new Worker(new URL('./depth-training-worker.js?v=automatic-folds', import.meta.url), { type: 'module' });
       job.worker = worker;
       function finish(error, result) {
         if (current !== job) return;
@@ -294,12 +298,10 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     }
   }
 
-  for (const control of ['cv-mode', 'folds']) {
-    field(control).addEventListener('change', () => {
-      clearTraining();
-      refresh();
-    });
-  }
+  field('cv-mode').addEventListener('change', () => {
+    clearTraining();
+    refresh();
+  });
   field('train').addEventListener('click', train);
   field('run').addEventListener('click', run);
   field('cancel').addEventListener('click', () => {

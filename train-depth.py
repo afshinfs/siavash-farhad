@@ -56,10 +56,10 @@ def predict_depth(model, x):
 
 
 def train_depth_models(folder, predictors, targets, block_size, progress, *, fold_count=5, cv_mode="pixel"):
-    if fold_count not in (4, 5):
-        raise ValueError("Select four or five spatial folds.")
     if cv_mode not in ("pixel", "block"):
         raise ValueError("Select pixel or spatial block cross-validation.")
+    if not 2 <= fold_count <= 5 or (cv_mode == "pixel" and fold_count != 5):
+        raise ValueError("Use five pixel folds or two to five spatial folds.")
     root = Path(folder)
     dem_path = root / "dem.tif"
     dem, grid = read_grid_layer(dem_path)

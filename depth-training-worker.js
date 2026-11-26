@@ -12,7 +12,7 @@ self.onmessage = async ({ data }) => {
   try {
     progress('Loading Python and XGBoost. The first run downloads the browser runtime.');
     const [{ loadPyodide }, helpers, program] = await Promise.all([
-      import(indexURL + 'pyodide.mjs'), readSource('./ml.py?v=desktop-training'), readSource('./train-depth.py?v=reference-support'),
+      import(indexURL + 'pyodide.mjs'), readSource('./ml.py?v=desktop-training'), readSource('./train-depth.py?v=automatic-folds'),
     ]);
     const py = await loadPyodide({ indexURL });
     await py.loadPackage(['numpy', 'scipy', 'scikit-learn', 'xgboost', 'rasterio']);

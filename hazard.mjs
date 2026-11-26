@@ -1,6 +1,6 @@
-import { showStudyArea, rangeLegend } from './raster-cards.mjs?v=map-legends';
+import { appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=river-maps';
 // Keep this kernel self-contained so the aligned GeoTIFF worker can run it.
-export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, mode = 'baseline', basis = 'auto', clean }) {
+export function computeHazards({ width, height, periods, depths, slope, manning, scenarioDepths = {}, referenceDepths = {}, basis = 'auto', clean }) {
   const size = width * height;
   const wetDepth = Math.fround(0.05);
   const adrLimits = [[0.3, 2, 0.3], [0.5, 2, 0.6], [1.2, 2, 0.6], [2, 2, 1], [4, 4, 4]]
@@ -9,6 +9,7 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   const floats = () => new Float32Array(size).fill(NaN);
   function classify(depth) {
     const velocity = floats(), product = floats(), adr = floats(), intensityD = floats(), intensityDV = floats();
+    let adrDepthFallbackCells = 0;
     for (let i = 0; i < size; i++) {
       const h = depth[i];
       if (!Number.isFinite(h) || h < 0) continue;
@@ -19,7 +20,14 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
         intensityDV[i] = 0;
         continue;
       }
-      if (!(slope[i] >= 0 && slope[i] <= 90 && Number.isFinite(manning[i]) && manning[i] > 0)) continue;
+      if (!(slope[i] >= 0 && slope[i] <= 90 && Number.isFinite(manning[i]) && manning[i] > 0)) {
+        // The desktop ADR7 classifier uses zero velocity where depth is valid.
+        // No velocity or depth–velocity product can be reported for these cells.
+        const level = adrLimits.findIndex(([maxH]) => h <= maxH);
+        adr[i] = level === -1 ? 6 : level + 1;
+        adrDepthFallbackCells++;
+        continue;
+      }
       const gradient = Math.min(0.01, Math.max(0.00001, Math.tan(slope[i] * Math.PI / 180)));
       const roughness = Math.min(0.2, Math.max(0.01, manning[i]));
       const v = Math.fround(Math.min(20, Math.max(h, 0.1) ** (2 / 3) * Math.sqrt(gradient) / roughness));
@@ -30,7 +38,7 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
       const level = adrLimits.findIndex(([maxH, maxV, maxDV]) => h <= maxH && v <= maxV && dv <= maxDV);
       adr[i] = level === -1 ? 6 : level + 1;
     }
-    return { velocity, product, adr, intensityD, intensityDV };
+    return { velocity, product, adr, intensityD, intensityDV, adrDepthFallbackCells };
   }
   function cleanClasses(values) {
     if (!clean) return values;
@@ -106,8 +114,21 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
   const dangerGroup = code => [0,1,1,2,1,2,2,3,3,3,4][code] ?? NaN;
   const composite = [], coverage = {};
   for (const period of periods) {
-    const baseline = classify(depths[period]);
-    const modified = scenarioDepths[period] ? classify(scenarioDepths[period]) : null;
+    const reference = referenceDepths[period];
+    let referenceFallbackCells = 0;
+    const baselineDepth = reference ? depths[period].map((depth, i) => {
+      if (Number.isFinite(depth) || !Number.isFinite(reference[i]) || reference[i] < 0) return depth;
+      referenceFallbackCells++;
+      return reference[i];
+    }) : depths[period];
+    const baseline = classify(baselineDepth);
+    const scenario = scenarioDepths[period];
+    let scenarioFallbackCells = 0;
+    const modified = scenario ? classify(scenario.map((depth, i) => {
+      if (Number.isFinite(depth) || !Number.isFinite(baselineDepth[i])) return depth;
+      scenarioFallbackCells++;
+      return baselineDepth[i];
+    })) : null;
     const selected = modified ?? baseline;
     const adr = cleanClasses(selected.adr);
     const intensityD = cleanClasses(selected.intensityD);
@@ -128,7 +149,8 @@ export function computeHazards({ width, height, periods, depths, slope, manning,
       if (baseline.intensityD[i] > 0) wetCells++;
       if (Number.isFinite(baseline.velocity[i])) hydraulicCells++;
     }
-    coverage[period] = { validDepthCells, wetCells, wetCellsWithVelocity: hydraulicCells };
+    coverage[period] = { validDepthCells, wetCells, wetCellsWithVelocity: hydraulicCells,
+      referenceFallbackCells, scenarioFallbackCells, adrDepthFallbackCells: selected.adrDepthFallbackCells };
   }
   for (const [name, field] of [['foen_depth_danger', 'intensityD'], ['foen_dv_danger', 'intensityDV']]) {
     rasters[name] = foenDanger(composite.map(item => item[field])).map(dangerGroup);
@@ -172,18 +194,18 @@ function productDescription(name) {
   return [label + ' · ' + Number(match[2]).toLocaleString() + ' years', type];
 }
 
-export function createHazardPanel({ element, readInputs, readScenarios, onChange, rasterWorker, callWorker }) {
+export function createHazardPanel({ element, readInputs, readScenarios, readRivers, onChange, rasterWorker, callWorker }) {
   const field = name => element('hazard-' + name);
   let active = null, result = null, url = null;
   const legends = {
-    danger: [[0, 'Dry / no class', '#edf3ee'], [1, 'Low', '#efcf58'], [2, 'Medium', '#628fce'], [3, 'Significant', '#a12639'], [4, 'Residual', '#bab3c7']],
+    danger: [[0, 'Dry / no class', '#edf3ee'], [1, 'Low', '#efcf58'], [2, 'Medium', '#628fce'], [3, 'Significant', '#a12639'], [4, 'Residual', '#f8de70']],
     adr: [[0, 'Dry / no class', '#edf3ee'], [1, 'H1', '#94d1ae'], [2, 'H2', '#e2d46e'], [3, 'H3', '#efa65a'], [4, 'H4', '#e47052'], [5, 'H5', '#b63f62'], [6, 'H6', '#69204b']],
     intensity: [[0, 'Dry / no class', '#edf3ee'], [1, 'Low', '#ecd779'], [2, 'Middle', '#e49453'], [3, 'High', '#a12639']],
     period: [[0, 'No classified exceedance', '#edf3ee'], [30, '30 years', '#9a3050'], [100, '100 years', '#d17338'], [300, '300 years', '#36838a'], [1000, '1,000 years', '#7f6ba9']],
   };
   legends.matrix = [[0,'Dry / no class','#edf3ee'],[1,'300 yr · low','#efcf58'],[2,'100 yr · low','#efcf58'],[3,'30 yr · low','#628fce'],
     [4,'300 yr · middle','#efcf58'],[5,'100 yr · middle','#628fce'],[6,'30 yr · middle','#628fce'],
-    [7,'300 yr · high','#a12639'],[8,'100 yr · high','#a12639'],[9,'30 yr · high','#a12639'],[10,'Residual','#bab3c7']];
+    [7,'300 yr · high','#a12639'],[8,'100 yr · high','#a12639'],[9,'30 yr · high','#a12639'],[10,'Residual','#f8de70']];
   const fromHex = hex => [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16));
   function read() {
     const inputs = readInputs();
@@ -261,8 +283,8 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
       for (const [, text, hex] of (type === 'matrix' ? legends.danger : legend)) {
         const item = document.createElement('span');
         const swatch = document.createElement('span');
-        swatch.className = 'hazard-swatch';
-        swatch.style.backgroundColor = hex;
+        swatch.className = text === 'Residual' ? 'hazard-swatch residual-swatch' : 'hazard-swatch';
+        if (text !== 'Residual') swatch.style.backgroundColor = hex;
         swatch.setAttribute('aria-hidden', 'true');
         item.append(swatch, text);
         legendNode.append(item);
@@ -273,8 +295,11 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
     const noData = document.createElement('span');
     noData.textContent = 'Transparent = NoData';
     legendNode.append(noData);
+    const { rivers } = result;
+    appendRiverLegend(legendNode, rivers);
     const preview = canvas.closest('study-area-map')?.parentElement ?? canvas.parentElement;
-    showStudyArea(preview, result.report.grid, canvas);
+    const stripeColor = type === 'danger' || type === 'matrix' ? fromHex('#f8de70') : undefined;
+    showStudyArea(preview, result.report.grid, canvas, { rivers, stripeColor });
   }
   function showLayer() {
     if (!result) return;
@@ -289,7 +314,7 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
   }
   field('run').addEventListener('click', async () => {
     if (field('run').disabled) return;
-    const { dem, slope, manning, depths, predicted, available } = read();
+    const { dem, slope, manning, depths, predicted, available, referenceDepths } = read();
     const mode = field('mode').value;
     const basis = field('basis').value;
     const scenarios = mode === 'baseline' ? null : available;
@@ -311,9 +336,10 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
       const { products, coverage, champion } = await callWorker(job, {
         action: 'hazard', slope, manning, depths, periods, clean,
         mode, basis, scenarios: scenarios?.[mode === 'worst' ? 'worst' : 'envelope'],
+        referenceDepths: predicted ? referenceDepths : undefined,
       }, 'Hazard');
       if (active !== job) return;
-      result = { products, report: {
+      result = { products, rivers: readRivers(), report: {
         schemaVersion: 1, stage: 'SIAVASH flood hazard', mode, periods, grid: prepared.grid, demSHA256: prepared.sourceSHA256,
         depthSource: predicted ? 'XGBoost predictions' : 'GloFAS reference depths',
         champion,
@@ -322,7 +348,9 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
         wetDepthM: 0.05, velocity: { formula: 'max(h, 0.10)^(2/3) * sqrt(S) / n',
           slope: 'tan(slopeDegrees × pi / 180)', gradientRange: [0.00001, 0.01], roughnessRange: [0.01, 0.20], maxMps: 20 },
         clean: clean ? 'Remove four-connected groups under six cells, then apply a 3 × 3 majority update to positive classes.' : null,
-        noData: 'Dry is 0 in categorical rasters. Velocity and D×V are NoData for dry cells or missing terrain inputs. First exceedance uses the earliest available classified period.',
+        noData: 'Dry is 0 in categorical rasters. Uncovered or excluded cells remain NoData. Velocity and D×V are NoData for dry cells or missing terrain inputs. First exceedance uses the earliest available classified period.',
+        coverageFallback: 'Aligned reference depth fills gaps in XGBoost depth where the reference is finite. Baseline depth fills missing scenario values. ADR7 uses depth with zero velocity where wet cells have missing hydraulic inputs, as in the desktop classifier.',
+        mapStyles: { foenResidual: 'Yellow and white diagonal stripes' },
         codebook: legends, coverage, products: Object.fromEntries(Object.entries(products).map(([name, product]) =>
           [name, { label: productDescription(name)[0], ...product.summary }])),
       } };
@@ -336,8 +364,11 @@ export function createHazardPanel({ element, readInputs, readScenarios, onChange
       field('champion-note').textContent = 'FOEN champion · ' + (champion.basis === 'dv' ? 'Depth × velocity' : 'Depth') +
         ' · Significant cells: ' + champion.depthCount.toLocaleString() + ' by depth, ' + champion.dvCount.toLocaleString() + ' by depth × velocity.';
       showLayer();
-      const missingVelocity = Object.values(coverage).some(row => row.wetCells > row.wetCellsWithVelocity);
-      status('Hazard layers ready.' + (missingVelocity ? ' Some wet cells lack valid slope or roughness. Check the layer coverage in the report.' : ''));
+      const rows = Object.values(coverage);
+      const notes = [];
+      if (rows.some(row => row.referenceFallbackCells)) notes.push('Aligned reference depth supplied gaps in the XGBoost predictions.');
+      if (rows.some(row => row.adrDepthFallbackCells)) notes.push('ADR7 uses depth where slope or roughness is missing. See the coverage report.');
+      status(['Hazard layers ready.', ...notes].join(' '));
     } catch (error) {
       if (active === job) status(error.message, true);
     } finally {
