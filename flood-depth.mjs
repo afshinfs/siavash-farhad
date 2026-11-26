@@ -1,3 +1,4 @@
+import { reflectFileSource } from './file-selection.mjs';
 import { appendRasterCard } from './raster-cards.mjs?v=patch-eight';
 export const glofasAsset = 'JRC/CEMS_GLOFAS/FloodHazard/v2_1';
 export const glofasPeriods = [10, 20, 50, 75, 100, 200, 500];
@@ -165,6 +166,7 @@ export function createFloodDepthPanel({ element, readConnection, request, raster
     refresh();
   }
   function setSource(blob, info) {
+    reflectFileSource(field('file'),blob);
     stop();
     clear();
     source = blob ? { blob, info } : null;
@@ -261,7 +263,6 @@ const fit = ${fitGumbelDepths.toString()};
   options.addEventListener('change', () => { clear(); message(''); refresh(); });
   field('file').addEventListener('change', event => {
     const file = event.target.files[0];
-    event.target.value = '';
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) { message('Use a DEM no larger than 8 MB.', true); return; }
     setSource(file, { kind: 'local file', label: file.name });

@@ -1,11 +1,12 @@
+import { setFileClearButton, reflectFileSource } from './file-selection.mjs';
 import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs?v=study-report';
 import { exportMapImage, mapLegend } from './map-export.mjs';
 import { createRiskPanel } from './risk.mjs?v=study-report';
 import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 import { createHazardPanel } from './hazard.mjs?v=export-report';
-import { createMLStackPanel } from './ml-stack.mjs?v=automatic-folds';
-import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=export-report';
-import { createFloodDepthPanel } from './flood-depth.mjs?v=patch-eight';
+import { createMLStackPanel } from './ml-stack.mjs?v=session-controls';
+import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=session-controls';
+import { createFloodDepthPanel } from './flood-depth.mjs?v=session-controls';
 
 // Pure request and validation logic; also included in the deployed gee.js bundle.
 const DATASET = 'USGS/SRTMGL1_003';
@@ -79,9 +80,11 @@ async function fetchDem({project,token,grid,signal,fetchImpl=fetch}) {
 const el=id=>document.getElementById(id);
 const PRESET={west:47.70,south:33.135,east:47.73,north:33.155};
 let map, rectangle, drawingPreview, drawingAnchor, elevationLayer, selectionStart, drawing=false, selected, grid, token=null, expiresAt=0, connectedClient=null;
+let earthEngineDEM=null;
 let requestController, inspector, demURL, resultReport, session=0, busy=false, pendingAuth=false, inspectionReject=null;
 function message(text,isError=false) {el('ee-message').textContent=text;el('ee-message').className=isError?'ee-message error':'ee-message';}
 function clearResult() {
+  earthEngineDEM=null;
   setTerrainSource(null);
   if(demURL) URL.revokeObjectURL(demURL);demURL=null;resultReport=null;
   el('ee-dem-download').hidden=true;el('ee-report-download').disabled=true;
@@ -260,7 +263,8 @@ async function retrieveDem() {
     message('Elevation received. Checking GeoTIFF pixels and projection in your browser…');
     const data=await inspectRaster(buffer,requestedGrid);
     if(active!==session)return;
-    setTerrainSource(blob,{kind:'Earth Engine',dataset:DATASET,project,label:'SRTM elevation',bounds});
+    earthEngineDEM={blob,info:{kind:'Earth Engine',dataset:DATASET,project,label:'SRTM elevation',bounds}};
+    setTerrainSource(blob,earthEngineDEM.info);
     demURL=URL.createObjectURL(blob);el('ee-dem-download').href=demURL;el('ee-dem-download').hidden=false;
     resultReport={schemaVersion:1,status:'passed',source:'Earth Engine',dataset:DATASET,project,requestedBounds:bounds,grid:requestedGrid,
       raster:data.summary,bytes:byteLength,seconds:(performance.now()-started)/1000,retrievedAt:new Date().toISOString(),
@@ -481,6 +485,7 @@ function clearTerrainProducts(){mlStackPanel.invalidate();
 }
 function stopTerrain(){clearTimeout(terrainTimer);terrainTimer=null;terrainEpoch++;terrainWorker?.terminate();terrainWorker=null;el('terrain-run').disabled=!terrainSource;el('terrain-cancel').disabled=true;el('terrain-file').disabled=false;}
 function setTerrainSource(blob,info=null){
+  reflectFileSource(el('terrain-file'),blob);
   setSatelliteSource(blob,info);
   exposurePanel.setSource(blob, info);
   floodDepthPanel.setSource(blob, info);
@@ -673,6 +678,7 @@ function clearHydroProducts(){mlStackPanel.invalidate();
 }
 function stopHydro(){clearTimeout(hydroTimer);hydroTimer=null;hydroEpoch++;hydroWorker?.terminate();hydroWorker=null;el('hydro-run').disabled=!hydroSource;el('hydro-cancel').disabled=true;el('hydro-file').disabled=false;}
 function setHydroSource(blob,info=null){
+  reflectFileSource(el('hydro-file'),blob);
   stopHydro();clearHydroProducts();hydroSource=blob;hydroSourceInfo=info;
   el('hydro-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM under Study area or open a downloaded DEM here.';
   el('hydro-run').disabled=!blob;hydroMessage(blob?'Elevation is ready for hydrological processing.':'Hydrology processing runs locally in your browser.');
@@ -863,6 +869,7 @@ function clearLinearProducts(){mlStackPanel.invalidate();
 }
 function stopLinear(){clearTimeout(linearTimer);linearTimer=null;linearEpoch++;linearWorker?.terminate();linearWorker=null;el('linear-run').disabled=!linearSource;el('linear-cancel').disabled=true;el('linear-file').disabled=false;el('linear-osm-file').disabled=false;el('linear-live').disabled=false;el('linear-server').disabled=false;}
 function setLinearSource(blob,info=null){
+  reflectFileSource(el('linear-file'),blob);
   stopLinear();clearLinearProducts();linearSource=blob;linearSourceInfo=info;
   el('linear-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM under Study area or open a downloaded DEM here.';
   el('linear-run').disabled=!blob;linearMessage(blob?'DEM ready. Retrieve OSM features, or open saved OSM data.':'Road/river processing runs locally in your browser.');
@@ -917,7 +924,8 @@ el('linear-osm-file').addEventListener('change',async()=>{
   try{const text=await file.text();if(epoch!==linearEpoch)return;JSON.parse(text);linearOSMText=text;el('linear-osm-source').textContent='OSM source: '+file.name;linearMessage('Saved OSM data selected. Calculate using the DEM grid.');}
   catch(e){if(epoch===linearEpoch)linearMessage('Could not read the OSM JSON file: '+e.message,true);}
 });
-el('linear-live').addEventListener('click',()=>{stopLinear();clearLinearProducts();linearOSMText=null;el('linear-osm-file').value='';el('linear-osm-source').textContent='OSM source: live Overpass API';linearMessage('Live OSM source selected.');});
+function useLiveOSM(){stopLinear();clearLinearProducts();linearOSMText=null;reflectFileSource(el('linear-osm-file'),null);el('linear-osm-source').textContent='OSM source: live Overpass API';linearMessage('Live OSM source selected.');}
+el('linear-live').addEventListener('click',useLiveOSM);
 el('linear-vectors').addEventListener('click',()=>{if(!linearVectors)return;const blob=new Blob([JSON.stringify(linearVectors)],{type:'application/geo+json'}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='siavash-roads-rivers.geojson';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);});
 
 el('linear-server').addEventListener('change',()=>{stopLinear();clearLinearProducts();linearMessage('OSM server selected. Calculate to retrieve features.');});
@@ -1280,7 +1288,8 @@ function satelliteMessage(text,error=false){el('sat-message').textContent=text;e
 function refreshSatellite(){const connected=Boolean(token)&&Date.now()<expiresAt;el('sat-run').disabled=!satSource||!connected||satBusy;el('sat-cancel').disabled=!satBusy;el('sat-auth').textContent=connected?'Uses the Earth Engine connection under Study area.':'Connect Google above, then retrieve or open a DEM.';for(const input of document.querySelectorAll('#sat-options input,#sat-options select,#sat-file'))input.disabled=satBusy;}
 function clearSatelliteProducts(){mlStackPanel.invalidate();for(const url of satURLs)URL.revokeObjectURL(url);satURLs=[];satProducts=[];satReport=null;el('sat-cards').replaceChildren();el('sat-report').disabled=true;}
 function stopSatellite(){satEpoch++;satAbort?.abort();satAbort=null;satWorker?.terminate();satWorker=null;if(satPending){satPending.reject(new DOMException('Cancelled','AbortError'));satPending=null;}satBusy=false;refreshSatellite();}
-function setSatelliteSource(blob,info=null){stopSatellite();clearSatelliteProducts();satSource=blob;satSourceInfo=info;el('sat-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a downloaded DEM.';satelliteMessage(blob?'DEM ready. Choose datasets and dates, then retrieve.':'Select the DEM grid and connect Earth Engine under Study area.');refreshSatellite();}
+function setSatelliteSource(blob,info=null){
+  reflectFileSource(el('sat-file'),blob);stopSatellite();clearSatelliteProducts();satSource=blob;satSourceInfo=info;el('sat-source').textContent=blob?`DEM ready: ${info?.label||'retrieved elevation'} · ${(blob.size/1024).toFixed(1)} KB`:'Retrieve a DEM above or open a downloaded DEM.';satelliteMessage(blob?'DEM ready. Choose datasets and dates, then retrieve.':'Select the DEM grid and connect Earth Engine under Study area.');refreshSatellite();}
 function satelliteWorkerCall(message,transfer=[]){return new Promise((resolve,reject)=>{if(satPending)return reject(Error('Satellite worker is already busy.'));const timer=setTimeout(()=>{if(satPending){satPending=null;reject(Error('Satellite decoding timed out.'));}},30000);satPending={expectedGroup:message.group,resolve:value=>{clearTimeout(timer);resolve(value);},reject:error=>{clearTimeout(timer);reject(error);}};satWorker.postMessage(message,transfer);});}
 function addSatelliteProducts(products) {
   mlStackPanel.invalidate();
@@ -2458,6 +2467,7 @@ function createExposurePanel({ element, readConnection, onPopulationChange, onEx
     refresh();
   }
   function setSource(blob, info) {
+    reflectFileSource(field('file'),blob);
     stop();
     clear();
     source = blob ? { blob, info } : null;
@@ -2574,7 +2584,6 @@ function createExposurePanel({ element, readConnection, onPopulationChange, onEx
     if (!file) return;
     if (file.size > 8 * 1024 * 1024) { message('Use a DEM no larger than 8 MB.', true); return; }
     setSource(file, { kind: 'local file', label: file.name });
-    event.target.value = '';
   });
   field('run').addEventListener('click', run);
   field('cancel').addEventListener('click', () => {
@@ -2661,6 +2670,16 @@ riskPanel.refresh();
 mlStackPanel.refresh();
 weaklinePanel.invalidate();
 hazardPanel.refresh();
+
+setFileClearButton(el('terrain-file'), () => setTerrainSource(earthEngineDEM?.blob ?? null, earthEngineDEM?.info));
+for (const [id,setSource] of [
+  ['hydro-file',setHydroSource], ['linear-file',setLinearSource], ['sat-file',setSatelliteSource],
+  ['exp-file',exposurePanel.setSource], ['flood-file',floodDepthPanel.setSource],
+]) {
+  setFileClearButton(el(id), () => setSource(terrainSource,terrainSourceInfo));
+}
+setFileClearButton(el('linear-osm-file'), useLiveOSM);
+setFileClearButton(el('weakline-depth25'), () => el('weakline-depth25').dispatchEvent(new Event('change')));
 
 const reportGroups = [
   ['01','Study area and elevation',['ee-title']],

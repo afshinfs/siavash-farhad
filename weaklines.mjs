@@ -268,6 +268,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     }
     field('run').disabled = Boolean(active) || Boolean(waiting);
     field('cancel').disabled = !active;
+    field('batch-cancel').disabled = active?.action !== 'weaklineBatch';
     field('batch').disabled = Boolean(active) || !terrain || !result?.features.length;
     for (const name of ['search','view-period','view-scenario','view-run']) field(name).disabled = Boolean(active);
     field('search-size').textContent = result?.features.length ? 'Possible closures before wet-cell filtering · ' +
@@ -301,6 +302,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     batchOutput = null;
     field('view-map').replaceChildren();
     field('batch-results').hidden = true;
+    field('batch-status').textContent = '';
     onClosureChange?.();
     selected.clear();
     clearComparison();
@@ -320,8 +322,9 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     setTimeout(() => URL.revokeObjectURL(url), 1000);
   }
   async function runWorker(action, dem, data) {
-    const job = { controller: new AbortController(), worker: null };
+    const job = { action, controller: new AbortController(), worker: null };
     active = job;
+    const progress = action === 'weaklineBatch' ? text => { field('batch-status').textContent = text; } : status;
     refresh();
     try {
       const code = '(' + rasterWorker.toString() + ')(null, {}, {}, {}, null, ' +
@@ -332,10 +335,10 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
       const buffer = dem instanceof Blob ? await dem.arrayBuffer() : dem.slice(0);
       if (active !== job) return null;
       const prepared = await callWorker(job, { action: 'prepare', buffer }, 'Weakline');
-      const output = await callWorker(job, { action, ...data }, 'Weakline', progress => status(progress));
+      const output = await callWorker(job, { action, ...data }, 'Weakline', progress);
       return active === job ? { ...output, prepared } : null;
     } catch (error) {
-      if (active === job) status(error.message, true);
+      if (active === job) progress(error.message, true);
       return null;
     } finally {
       job.worker?.terminate();
@@ -482,7 +485,8 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     if (field('batch').disabled) return;
     const { dem, terrain, depths, riverDistance, population, predicted } = sourceInputs();
     const exhaustive = field('search').value === 'all';
-    status('Preparing the scenario search…');
+    status('');
+    field('batch-status').textContent = 'Preparing the scenario search…';
     const output = await runWorker('weaklineBatch', dem, {
       terrain, depths, riverDistance, population, candidates: result.candidates, periods, exhaustive,
     });
@@ -503,7 +507,7 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
     field('batch-results').hidden = false;
     updateScenarioChoices();
     onClosureChange?.();
-    status('Scenario search complete. Use Flood hazard maps to inspect the three modes.');
+    field('batch-status').textContent = 'Scenario search complete. Use Flood hazard maps to inspect the three modes.';
   });
   function updateScenarioChoices() {
     field('view-map').replaceChildren();
@@ -555,13 +559,19 @@ export function createWeaklinePanel({ element, readInputs, rasterWorker, callWor
   for (const name of ['method', 'source', 'depth25', 'footprint-threshold', 'buffer', 'threshold', 'minimum']) {
     field(name).addEventListener('change', invalidate);
   }
-  field('cancel').addEventListener('click', () => {
-    active?.controller.abort();
-    active?.worker?.terminate();
+  function cancelProcessing() {
+    if (!active) return;
+    const job = active;
     active = null;
-    status('Weakline processing cancelled.');
+    job.controller.abort();
+    job.worker?.terminate();
+    if (job.action === 'weaklineBatch') {
+      field('batch-status').textContent = 'Scenario search cancelled. Candidate weaklines and any previously completed search are still available.';
+    } else status('Weakline processing cancelled.');
     refresh();
-  });
+  }
+  field('cancel').addEventListener('click', cancelProcessing);
+  field('batch-cancel').addEventListener('click', cancelProcessing);
   field('geojson').addEventListener('click', () => {
     if (result) download({ type: 'FeatureCollection', features: result.features }, 'siavash-weaklines.geojson', 'application/geo+json');
   });

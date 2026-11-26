@@ -103,6 +103,30 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     return Math.min(...report.targetResults.map(target => spatial ? target.occupiedBlocks : target.usableCells));
   }
 
+  function renderLocalFiles() {
+    const container = field('selected-files');
+    const files = [[null,localDEM],...localLayers].filter(([,file])=>file);
+    container.hidden = !files.length;
+    const list = document.createElement('ul');
+    for (const [key,file] of files) {
+      const item=document.createElement('li'), button=document.createElement('button');
+      button.type='button';
+      button.className='secondary';
+      button.textContent='Remove';
+      button.setAttribute('aria-label','Remove '+file.name);
+      button.disabled=Boolean(current);
+      button.onclick=()=>{
+        if (key===null) localDEM=null;
+        else localLayers.delete(key);
+        invalidate();
+        message('Removed '+file.name+'.');
+      };
+      item.append(file.name,button);
+      list.append(item);
+    }
+    container.replaceChildren(list);
+  }
+
   function refresh() {
     const { dem } = readSession();
     field('source').textContent = localDEM ? 'Local DEM · ' + localDEM.name
@@ -128,6 +152,7 @@ export function createMLStackPanel({ element, readSession, rasterWorker, callWor
     field('clear').disabled = Boolean(current) || !(localDEM || localLayers.size);
     field('dem').disabled = Boolean(current);
     field('layers').disabled = Boolean(current);
+    renderLocalFiles();
   }
   function trainingMessage(text, error = false) {
     field('training-status').textContent = text;
