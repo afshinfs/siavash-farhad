@@ -1,4 +1,4 @@
-import { exportMapImage, exportLegend, mapLegend, paintLegendKey } from './map-export.mjs?v=basemap';
+import { exportMapImage, exportLegend, mapLegend, paintLegendKey, legendLayout } from './map-export.mjs?v=legend-columns';
 
 let pdfLibrary;
 function loadPDF() {
@@ -113,15 +113,24 @@ export function createStudyReport({groups, readBounds, getExtraOutputs}) {
         const subtitle=[output.group,output.title].filter((v,i,a)=>v&&a.indexOf(v)===i).join(' / ');
         y=write(pdf,subtitle,16,y,178,11)+6;
         const image=await output.image(bounds);
-        const ratio=Math.min(178/image.width,155/image.height);
+        pdf.setFont('helvetica','normal');
+        pdf.setFontSize(9);
+        const layout=legendLayout(output.legend(),178,5,13,4,2,
+          (label,limit)=>pdf.splitTextToSize(clean(label),limit));
+        pdf.setFontSize(8);
+        const creditLines=pdf.splitTextToSize(clean(image.basemapCredit),178).length;
+        const legendStart=5+creditLines*8*.43+3;
+        const mapHeight=Math.min(155,278-y-legendStart-layout.height);
+        const ratio=Math.min(178/image.width,mapHeight/image.height);
         const width=image.width*ratio,height=image.height*ratio,x=(210-width)/2;
         pdf.addImage(image,'PNG',x,y,width,height);
         pdf.setDrawColor(175,192,184);pdf.rect(x,y,width,height);
         y=write(pdf,image.basemapCredit,16,y+height+5,178,8)+3;
-        for (const entry of output.legend()) {
-          if (y>272) {pdf.addPage();y=header();y=write(pdf,subtitle+' / Legend',16,y,178,11,'bold')+4;}
-          if(entry.colors.length) pdf.addImage(legendImage(entry),'PNG',16,y-3,11,3);
-          y=write(pdf,entry.label,30,y,164,9)+1;
+        pdf.setFontSize(9);
+        for (const {entry,lines,x:column,y:row} of layout.cells) {
+          const left=16+column, baseline=y+row;
+          if(entry.colors.length) pdf.addImage(legendImage(entry),'PNG',left,baseline-2.7,10,2.5);
+          lines.forEach((line,index)=>pdf.text(line,left+layout.keyWidth,baseline+4*index));
         }
       }
       for(let page=1;page<=pdf.getNumberOfPages();page++){

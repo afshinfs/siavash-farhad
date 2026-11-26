@@ -172,6 +172,36 @@ export function exportLegend(view) {
   return mapLegend(legend);
 }
 
+// Fill each row left to right. The tallest label determines the row height.
+export function legendLayout(entries,width,gap,keyWidth,lineHeight,rowGap,wrap) {
+  const columns = Math.min(entries.length || 1,entries.length >= 6 ? 3 : 2);
+  const columnWidth = (width-(columns-1)*gap)/columns;
+  const cells=[];
+  let y=0;
+  for(let i=0;i<entries.length;i+=columns) {
+    let tallest=0;
+    for(const [column,entry] of entries.slice(i,i+columns).entries()) {
+      const lines=wrap(entry.label,columnWidth-keyWidth);
+      cells.push({entry,lines,x:column*(columnWidth+gap),y,textWidth:columnWidth-keyWidth});
+      tallest=Math.max(tallest,lines.length);
+    }
+    y+=tallest*lineHeight+rowGap;
+  }
+  return {cells,height:y,keyWidth};
+}
+
+function wrapLabel(ctx,label,width) {
+  const lines=[];
+  let line='';
+  for(const word of label.split(/\s+/)){
+    const next=line ? line+' '+word : word;
+    if(line && ctx.measureText(next).width>width){lines.push(line);line=word;}
+    else line=next;
+  }
+  if(line) lines.push(line);
+  return lines;
+}
+
 export function mapDownloads(container, {name, title, tiff, view, legend}) {
   const actions = document.createElement('div');
   actions.className = 'terrain-downloads';
@@ -192,18 +222,23 @@ export function mapDownloads(container, {name, title, tiff, view, legend}) {
       try {
         const map = await exportMapImage(view());
         const entries = mapLegend(legend);
-        const output = canvas(Math.max(map.width+48,800),map.height+137+29*entries.length);
+        const width = Math.max(map.width+48,800);
+        const measure = canvas(1,1).getContext('2d');
+        measure.font='18px sans-serif';
+        const layout = legendLayout(entries,width-48,18,42,22,7,(label,limit)=>wrapLabel(measure,label,limit));
+        const output = canvas(width,map.height+126+layout.height);
         const ctx = output.getContext('2d');
         ctx.fillStyle='#fff'; ctx.fillRect(0,0,output.width,output.height);
         ctx.fillStyle='#183b35'; ctx.font='bold 28px sans-serif'; ctx.fillText(title,24,42,output.width-48);
         ctx.drawImage(map,(output.width-map.width)/2,65);
         ctx.strokeStyle='#aebfba';ctx.strokeRect((output.width-map.width)/2,65,map.width,map.height);
         ctx.font='18px sans-serif';
-        entries.forEach(({label,colors,striped},i) => {
-          const y = map.height+86+29*i;
-          paintLegendKey(ctx,colors,striped,24,y,32,14);
-          ctx.fillStyle='#183b35';ctx.fillText(label,66,y+13,output.width-90);
-        });
+        for (const {entry,lines,x,y,textWidth} of layout.cells) {
+          const left=24+x, top=map.height+86+y;
+          paintLegendKey(ctx,entry.colors,entry.striped,left,top,32,14);
+          ctx.fillStyle='#183b35';
+          lines.forEach((line,index)=>ctx.fillText(line,left+layout.keyWidth,top+14+22*index,textWidth));
+        }
         ctx.fillStyle='#355d53';ctx.font='15px sans-serif';
         ctx.fillText(map.basemapCredit,24,output.height-15,output.width-48);
         const blob = await new Promise(resolve => output.toBlob(resolve,'image/png'));

@@ -1,9 +1,9 @@
 import { setFileClearButton, reflectFileSource } from './file-selection.mjs';
-import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs?v=basemap';
-import { exportMapImage, mapLegend } from './map-export.mjs?v=basemap';
-import { createRiskPanel } from './risk.mjs?v=basemap';
+import { createStudyReport, weaklineOutput, rasterPreviewOutput } from './study-report.mjs?v=legend-columns';
+import { exportMapImage, mapLegend } from './map-export.mjs?v=legend-columns';
+import { createRiskPanel } from './risk.mjs?v=legend-columns';
 import { showStudyArea, appendRasterCard, rangeLegend } from './raster-cards.mjs?v=patch-eight';
-import { createHazardPanel } from './hazard.mjs?v=basemap';
+import { createHazardPanel } from './hazard.mjs?v=legend-columns';
 import { createMLStackPanel } from './ml-stack.mjs?v=session-controls';
 import { createWeaklinePanel, screenWeaklines, compareWeaklineClosure } from './weaklines.mjs?v=session-controls';
 import { createFloodDepthPanel } from './flood-depth.mjs?v=session-controls';
