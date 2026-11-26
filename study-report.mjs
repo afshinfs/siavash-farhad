@@ -1,4 +1,4 @@
-import { exportMapImage, exportLegend, mapLegend, paintLegendKey } from './map-export.mjs';
+import { exportMapImage, exportLegend, mapLegend, paintLegendKey } from './map-export.mjs?v=basemap';
 
 let pdfLibrary;
 function loadPDF() {
@@ -117,7 +117,7 @@ export function createStudyReport({groups, readBounds, getExtraOutputs}) {
         const width=image.width*ratio,height=image.height*ratio,x=(210-width)/2;
         pdf.addImage(image,'PNG',x,y,width,height);
         pdf.setDrawColor(175,192,184);pdf.rect(x,y,width,height);
-        y+=height+6;
+        y=write(pdf,image.basemapCredit,16,y+height+5,178,8)+3;
         for (const entry of output.legend()) {
           if (y>272) {pdf.addPage();y=header();y=write(pdf,subtitle+' / Legend',16,y,178,11,'bold')+4;}
           if(entry.colors.length) pdf.addImage(legendImage(entry),'PNG',16,y-3,11,3);

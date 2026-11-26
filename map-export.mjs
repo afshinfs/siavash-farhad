@@ -13,10 +13,67 @@ function canvas(width, height) {
   return image;
 }
 
+const worldHalf = 20037508.342789244;
+const attribution = '© OpenStreetMap contributors · openstreetmap.org/copyright';
+
 function gridProjection(grid) {
   const epsg = Number((grid.crsCode || grid.crs).split(':').pop());
   const utm = '+proj=utm +zone=' + (epsg % 100) + (epsg >= 32700 ? ' +south' : '') + ' +datum=WGS84 +units=m';
-  return window.proj4('EPSG:4326', utm);
+  return window.proj4(utm, 'EPSG:3857');
+}
+
+function loadTile(zoom,x,y) {
+  return new Promise(resolve => {
+    const tile = new Image();
+    const finish = result => {
+      clearTimeout(timer);
+      tile.onload = tile.onerror = null;
+      if (!result) tile.removeAttribute('src');
+      resolve(result);
+    };
+    const timer = setTimeout(() => finish(null), 8000);
+    tile.crossOrigin = 'anonymous';
+    tile.onload = () => finish(tile);
+    tile.onerror = () => finish(null);
+    tile.src = 'https://tile.openstreetmap.org/'+zoom+'/'+x+'/'+y+'.png';
+  });
+}
+
+let lastBasemap;
+function basemap(extent,width,height) {
+  const key = [width,height,...extent].join(',');
+  if (lastBasemap?.key === key) return lastBasemap.image;
+  const image = drawBasemap(extent,width,height);
+  lastBasemap = {key,image};
+  return image;
+}
+
+async function drawBasemap([west,south,east,north],width,height) {
+  const image = canvas(width,height), ctx = image.getContext('2d');
+  ctx.fillStyle = '#eef3ee';
+  ctx.fillRect(0,0,width,height);
+  const zoom = Math.max(0,Math.min(19,Math.floor(Math.log2(width*2*worldHalf/((east-west)*256)))));
+  const count = 2 ** zoom, size = 2*worldHalf/count;
+  const tileX = x => (x+worldHalf)/size;
+  const tileY = y => (worldHalf-y)/size;
+  const left = tileX(west), right = tileX(east), top = tileY(north), bottom = tileY(south);
+  const scaleX = width/(right-left), scaleY = height/(bottom-top);
+  const tiles = [];
+  for(let y=Math.max(0,Math.floor(top));y<Math.min(count,Math.ceil(bottom));y++) {
+    for(let x=Math.floor(left);x<Math.ceil(right);x++) {
+      const tx=x,ty=y;
+      tiles.push(loadTile(zoom,((x%count)+count)%count,y).then(tile=>{
+        if (tile) {
+          const x0=Math.round((tx-left)*scaleX), y0=Math.round((ty-top)*scaleY);
+          ctx.drawImage(tile,x0,y0,Math.round((tx+1-left)*scaleX)-x0,Math.round((ty+1-top)*scaleY)-y0);
+        }
+        return Boolean(tile);
+      }));
+    }
+  }
+  const loaded=(await Promise.all(tiles)).filter(Boolean).length;
+  return {image,credit:!loaded ? 'Basemap unavailable' :
+    loaded===tiles.length ? attribution : attribution+' · Some map tiles unavailable'};
 }
 
 function paintLines(ctx, features, project, color) {
@@ -30,28 +87,36 @@ function paintLines(ctx, features, project, color) {
   }
 }
 
-export function exportMapImage({canvas: source, grid, rivers, stripeColor, vectors, vectorColor}, bounds) {
+export async function exportMapImage({canvas: source, grid, rivers, stripeColor, vectors, vectorColor}, bounds) {
   const t = grid && (grid.affineTransform || grid.transform);
-  const projection = grid && (bounds || rivers?.length) ? gridProjection(grid) : null;
-  const aspect = bounds ? (bounds.east-bounds.west)*Math.cos((bounds.north+bounds.south)*Math.PI/360)/(bounds.north-bounds.south)
-    : source.width*Math.abs(t.scaleX)/(source.height*Math.abs(t.scaleY));
+  const projection = grid ? gridProjection(grid) : null;
+  const geographic = window.proj4('EPSG:4326','EPSG:3857');
+  let outline;
+  if (!bounds) {
+    const left=t.translateX, top=t.translateY;
+    const right=left+source.width*t.scaleX, bottom=top+source.height*t.scaleY;
+    outline=[[left,top],[right,top],[right,bottom],[left,bottom]].map(point=>projection.forward(point));
+  }
+  const points = outline ?? [geographic.forward([bounds.west,bounds.south]),geographic.forward([bounds.east,bounds.north])];
+  const xs=points.map(point=>point[0]), ys=points.map(point=>point[1]);
+  const west=Math.min(...xs),east=Math.max(...xs),south=Math.min(...ys),north=Math.max(...ys);
+  const aspect=(east-west)/(north-south);
   const maxSize = bounds ? 750 : 1200;
   const width = Math.max(1, Math.round(maxSize*Math.min(1,aspect)));
   const height = Math.max(1, Math.round(maxSize*Math.min(1,1/aspect)));
   const image = canvas(width, height), ctx = image.getContext('2d');
-  const mapPoint = bounds ? ([lon,lat]) => [(lon-bounds.west)/(bounds.east-bounds.west)*width, (bounds.north-lat)/(bounds.north-bounds.south)*height]
-    : point => {
-      const [x,y] = projection.forward(point);
-      return [(x-t.translateX)/t.scaleX*width/source.width,(y-t.translateY)/t.scaleY*height/source.height];
-    };
+  const base=await basemap([west,south,east,north],width,height);
+  ctx.drawImage(base.image,0,0);
+  image.basemapCredit=base.credit;
+  const screenPoint = ([x,y]) => [(x-west)/(east-west)*width,(north-y)/(north-south)*height];
+  const mapPoint = point => screenPoint(geographic.forward(point));
   if (source) {
     const pixels = source.getContext('2d').getImageData(0,0,source.width,source.height).data;
     const result = ctx.createImageData(width,height);
     for (let row=0;row<height;row++) for (let col=0;col<width;col++) {
-      const [gx,gy] = bounds ? projection.forward([
-        bounds.west+(col+.5)/width*(bounds.east-bounds.west),
-        bounds.north-(row+.5)/height*(bounds.north-bounds.south),
-      ]) : [t.translateX+(col+.5)*source.width/width*t.scaleX,t.translateY+(row+.5)*source.height/height*t.scaleY];
+      const [gx,gy] = projection.inverse([
+        west+(col+.5)/width*(east-west), north-(row+.5)/height*(north-south),
+      ]);
       const x=Math.floor((gx-t.translateX)/t.scaleX), y=Math.floor((gy-t.translateY)/t.scaleY);
       if (x<0 || x>=source.width || y<0 || y>=source.height) continue;
       const from=(y*source.width+x)*4, to=(row*width+col)*4;
@@ -64,11 +129,23 @@ export function exportMapImage({canvas: source, grid, rivers, stripeColor, vecto
         result.data[to+3]=pixels[from+3];
       }
     }
-    ctx.putImageData(result,0,0);
+    const overlay=canvas(width,height);
+    overlay.getContext('2d').putImageData(result,0,0);
+    ctx.globalAlpha=.83;
+    ctx.drawImage(overlay,0,0);
+    ctx.globalAlpha=1;
   }
   ctx.lineWidth=3;
   paintLines(ctx,rivers,mapPoint,()=> '#1686b6');
   paintLines(ctx,vectors,mapPoint,vectorColor);
+  if (outline) {
+    ctx.strokeStyle='#243e4a';
+    ctx.lineWidth=2;
+    ctx.beginPath();
+    outline.forEach((point,i)=>ctx[i?'lineTo':'moveTo'](...screenPoint(point)));
+    ctx.closePath();
+    ctx.stroke();
+  }
   return image;
 }
 
@@ -113,9 +190,9 @@ export function mapDownloads(container, {name, title, tiff, view, legend}) {
       const original = button.textContent;
       button.disabled = true;
       try {
-        const map = exportMapImage(view());
+        const map = await exportMapImage(view());
         const entries = mapLegend(legend);
-        const output = canvas(Math.max(map.width+48,800),map.height+110+29*entries.length);
+        const output = canvas(Math.max(map.width+48,800),map.height+137+29*entries.length);
         const ctx = output.getContext('2d');
         ctx.fillStyle='#fff'; ctx.fillRect(0,0,output.width,output.height);
         ctx.fillStyle='#183b35'; ctx.font='bold 28px sans-serif'; ctx.fillText(title,24,42,output.width-48);
@@ -127,6 +204,8 @@ export function mapDownloads(container, {name, title, tiff, view, legend}) {
           paintLegendKey(ctx,colors,striped,24,y,32,14);
           ctx.fillStyle='#183b35';ctx.fillText(label,66,y+13,output.width-90);
         });
+        ctx.fillStyle='#355d53';ctx.font='15px sans-serif';
+        ctx.fillText(map.basemapCredit,24,output.height-15,output.width-48);
         const blob = await new Promise(resolve => output.toBlob(resolve,'image/png'));
         if (!blob) throw Error('PNG encoding failed.');
         saveFile(blob,name+'.png');

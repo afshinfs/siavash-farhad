@@ -1,4 +1,4 @@
-import { mapDownloads } from "./map-export.mjs";
+import { mapDownloads } from "./map-export.mjs?v=basemap";
 import { fillDryPatches, mapRiverCells, appendRiverLegend, showStudyArea, rangeLegend } from './raster-cards.mjs?v=patch-eight';
 // Self-contained for execution inside the aligned GeoTIFF worker.
 export function computeRisk({ layers, mask, width, method, binning }) {
